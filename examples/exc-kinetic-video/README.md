@@ -79,6 +79,8 @@ node render.mjs --from 29 --to 52   # 구간 미리보기(무음)
 | `DESIGN.md` | 색·타이포·모션 원칙. `colors`를 바꾸면 영상 색이 바뀐다 |
 | `NARRATION.md` | Eleven v4용 한국어 내레이션 대본(입력문, 큐 시트, 생성·배치·믹스 방법) |
 | `narration.json` | 같은 대본의 기계용 데이터(블록, 큐별 발화 시작·허용 창·대체 문구) |
+| `vo_sync.json` | 실제 Eleven v4 테이크를 큐별로 잘라 놓는 배치표(원본 구간 → 영상 시각, 믹스 설정) |
+| `mix-vo.mjs` | 배치표를 적용해 내레이션·덕킹 배경음을 섞고 `out/exc-kinetic-vo.mp4`를 만든다(`npm run mix`, 테이크는 `vo/`에 둔다) |
 
 ## 5. 바꾸기 쉬운 곳
 
