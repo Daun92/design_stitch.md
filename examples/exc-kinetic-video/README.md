@@ -77,6 +77,8 @@ node render.mjs --from 29 --to 52   # 구간 미리보기(무음)
 | `render.mjs` | 정적 서버 + Playwright 프레임 캡처 → FFmpeg |
 | `bgm.mjs` | 장면 큐에 맞춘 120BPM 배경음 합성 → `bgm.wav` |
 | `DESIGN.md` | 색·타이포·모션 원칙. `colors`를 바꾸면 영상 색이 바뀐다 |
+| `NARRATION.md` | Eleven v4용 한국어 내레이션 대본(입력문, 큐 시트, 생성·배치·믹스 방법) |
+| `narration.json` | 같은 대본의 기계용 데이터(블록, 큐별 발화 시작·허용 창·대체 문구) |
 
 ## 5. 바꾸기 쉬운 곳
 
