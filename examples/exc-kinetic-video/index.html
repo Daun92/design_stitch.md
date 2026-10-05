@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>엑스퍼트컨설팅 키네틱</title>
+<style>
+@font-face {
+  font-family: "Pretendard";
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: block;
+  src: url("node_modules/pretendard/dist/web/variable/woff2/PretendardVariable.woff2") format("woff2-variations"),
+       url("https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/woff2/PretendardVariable.woff2") format("woff2-variations");
+}
+:root { --bg: #0e0f12; --fg: #e8e4da; --mute: #8d9097; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: Pretendard, system-ui, sans-serif; }
+body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; }
+canvas { display: block; width: min(100%, calc((100vh - 96px) * 16 / 9)); height: auto; aspect-ratio: 16 / 9; background: #F2EEE5; }
+.ui { display: flex; align-items: center; gap: 12px; width: min(100%, calc((100vh - 96px) * 16 / 9)); font-variant-numeric: tabular-nums; }
+.ui button { width: 44px; height: 32px; border: 1px solid #3a3d44; background: #1a1c21; color: var(--fg); border-radius: 6px; cursor: pointer; font: inherit; }
+.ui input { flex: 1; accent-color: #E0412B; }
+.ui span { color: var(--mute); min-width: 92px; text-align: right; font-size: 14px; }
+body.render { padding: 0; display: block; }
+body.render .ui { display: none; }
+body.render canvas { width: 1920px; height: 1080px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<div class="ui">
+  <button id="play" aria-label="재생">▶</button>
+  <input id="seek" type="range" min="0" max="88" step="0.01" value="0" aria-label="타임라인">
+  <span id="tc">00.00 / 88.00</span>
+</div>
+<audio id="au" src="bgm.wav" preload="auto"></audio>
+<script>
+'use strict';
+// 엑스퍼트컨설팅 키네틱 모션그래픽 — render(t)는 t(초)만으로 프레임을 결정한다(결정론적).
+const W = 1920, H = 1080, FPS = 30, DUR = 88;
+const RENDER = new URLSearchParams(location.search).has('render');
+if (RENDER) document.body.classList.add('render');
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+// ---------- 토큰: DESIGN.md의 colors 블록을 읽어 덮어쓴다 ----------
+const C = { paper: '#F2EEE5', ink: '#15171C', signal: '#E0412B', cobalt: '#2347C6', ochre: '#EDB01F', graphite: '#6B6E75', rule: '#CFC8BA' };
+async function loadTokens() {
+  try {
+    const r = await fetch('DESIGN.md', { cache: 'no-store' });
+    if (!r.ok) return;
+    const fm = (await r.text()).split(/^---\s*$/m)[1] || '';
+    const block = fm.split(/^colors:\s*$/m)[1];
+    if (!block) return;
+    for (const line of block.split('\n').slice(1)) {
+      if (/^\S/.test(line)) break;
+      const m = line.match(/^\s+([\w-]+):\s*["']?(#[0-9a-fA-F]{6})["']?/);
+      if (m && m[1] in C) C[m[1]] = m[2];
+    }
+  } catch (e) { /* 기본 팔레트 사용 */ }
+}
+
+// ---------- 수학/이징 ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const wrap = (v, lo, hi) => { const r = hi - lo; return ((v - lo) % r + r) % r + lo; };
+const TAU = Math.PI * 2;
+const E = {
+  inQuad: x => x * x,
+  outQuad: x => 1 - (1 - x) * (1 - x),
+  inCubic: x => x * x * x,
+  outCubic: x => 1 - Math.pow(1 - x, 3),
+  inOutCubic: x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2,
+  inExpo: x => x <= 0 ? 0 : Math.pow(2, 10 * x - 10),
+  outExpo: x => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x),
+  outBack: x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+  outBounce: x => {
+    const n = 7.5625, d = 2.75;
+    if (x < 1 / d) return n * x * x;
+    if (x < 2 / d) return n * (x -= 1.5 / d) * x + 0.75;
+    if (x < 2.5 / d) return n * (x -= 2.25 / d) * x + 0.9375;
+    return n * (x -= 2.625 / d) * x + 0.984375;
+  },
+};
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+function mix(a, b, t) {
+  const A = hex(a), B = hex(b);
+  return `rgb(${A.map((v, i) => Math.round(lerp(v, B[i], clamp(t)))).join(',')})`;
+}
+const damped = (t, t0, w, k) => t < t0 ? 0 : Math.exp(-k * (t - t0)) * Math.sin(w * (t - t0));
+
+// ---------- 그리기 기본 ----------
+const F = (w, s) => `${Math.round(clamp(w, 45, 920))} ${s}px Pretendard, sans-serif`;
+function bg(col) { ctx.fillStyle = col; ctx.fillRect(0, 0, W, H); }
+function disc(x, y, r, col, a = 1) {
+  if (r <= 0 || a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.fillStyle = col;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); ctx.restore();
+}
+function ring(x, y, r, col, lw, a = 1, a0 = 0, a1 = TAU, dash) {
+  if (r <= 0 || a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round';
+  if (dash) ctx.setLineDash(dash);
+  ctx.beginPath(); ctx.arc(x, y, r, a0, a1); ctx.stroke(); ctx.restore();
+}
+function line(x1, y1, x2, y2, col, lw, a = 1) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore();
+}
+
+// 대괄호 [ ] 안의 글자는 강조색(signal)으로 칠한다.
+function parse(str) {
+  const out = []; let acc = false;
+  for (const c of str) {
+    if (c === '[') { acc = true; continue; }
+    if (c === ']') { acc = false; continue; }
+    out.push({ c, acc });
+  }
+  return out;
+}
+const LM = new Map();
+function lay(str, size, weight, track = 0) {
+  const key = `${str}|${size}|${weight}|${track}`;
+  let v = LM.get(key);
+  if (v) return v;
+  ctx.save(); ctx.font = F(weight, size);
+  let x = 0;
+  const chars = parse(str).map(o => {
+    const w = ctx.measureText(o.c).width;
+    const r = { ...o, cx: x + w / 2, w };
+    x += w + track * size;
+    return r;
+  });
+  ctx.restore();
+  v = { chars, width: x - track * size };
+  LM.set(key, v);
+  return v;
+}
+
+// 글자 단위 키네틱 텍스트. fn(i, n, ch)가 글자별 {dx,dy,a,s,sy,r,w,color}를 돌려준다.
+function kText(str, x, y, o = {}, fn) {
+  const size = o.size || 80, weight = o.weight ?? 700, track = o.track || 0;
+  const L = lay(str, size, weight, track);
+  const x0 = o.align === 'center' ? x - L.width / 2 : o.align === 'right' ? x - L.width : x;
+  const n = L.chars.length;
+  const st = L.chars.map((ch, i) => (ch.c === ' ' ? null : { ch, a: fn ? fn(i, n, { ...ch, ax: x0 + ch.cx, ay: y }) : {} }));
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  const passes = o.halo ? ['halo', 'fill'] : ['fill'];
+  for (const pass of passes) {
+    for (const s of st) {
+      if (!s) continue;
+      const a = s.a, al = (a.a ?? 1) * (o.alpha ?? 1);
+      if (al <= 0.002) continue;
+      ctx.save();
+      ctx.translate(x0 + s.ch.cx + (a.dx || 0), y + (a.dy || 0));
+      if (a.r) ctx.rotate(a.r);
+      const sx = a.s ?? 1, sy = a.sy ?? sx;
+      if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
+      ctx.font = F(a.w ?? weight, size);
+      ctx.globalAlpha = al;
+      if (pass === 'halo') {
+        ctx.lineJoin = 'round'; ctx.lineWidth = o.halo[1]; ctx.strokeStyle = o.halo[0];
+        ctx.strokeText(s.ch.c, 0, 0);
+      } else {
+        ctx.fillStyle = a.color || (s.ch.acc ? (o.acc || C.signal) : (o.color || C.ink));
+        ctx.fillText(s.ch.c, 0, 0);
+      }
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+  return { x0, width: L.width, chars: L.chars };
+}
+
+function cin(t, t0, i, n, gap, dur, from) {
+  const order = from === 'center' ? Math.abs(i - (n - 1) / 2) : from === 'end' ? n - 1 - i : i;
+  const s = t0 + order * gap;
+  return prog(t, s, s + dur);
+}
+// 등장/퇴장 프리셋
+function anim(t, tin, tout, o = {}) {
+  const S = o.size || 80, Wt = o.weight ?? 700;
+  return (i, n, ch) => {
+    const p = cin(t, tin, i, n, o.gap ?? 0.04, o.dur ?? 0.6, o.from);
+    const r = { a: 1 };
+    switch (o.type || 'rise') {
+      case 'rise': { const e = E.outCubic(p); r.dy = (1 - e) * S * 0.45; r.a = clamp(p * 2.2); r.w = lerp(Wt * 0.25, Wt, E.outCubic(clamp(p * 1.3))); break; }
+      case 'slam': { const e = E.outExpo(p); r.s = lerp(1.9, 1, e); r.a = clamp(p * 4); r.w = lerp(120, Wt, e); break; }
+      case 'drop': { const e = E.outBack(p); r.dy = -(1 - e) * S * 0.9; r.a = clamp(p * 3); r.w = lerp(Wt * 0.4, Wt, E.outCubic(p)); break; }
+      case 'slide': { const e = E.outExpo(p); r.dx = (1 - e) * S * 1.4; r.a = clamp(p * 2.5); r.w = lerp(Wt * 0.3, Wt, e); break; }
+      case 'mask': { const e = E.outExpo(p); r.dy = (1 - e) * S * 1.15; break; }
+    }
+    if (tout != null) {
+      const q = cin(t, tout, i, n, o.outGap ?? 0.02, o.outDur ?? 0.35, o.outFrom);
+      if (q > 0) {
+        const e = E.inCubic(q);
+        switch (o.outType || 'fall') {
+          case 'fall': r.dy = (r.dy || 0) + e * S * 0.6; r.a *= 1 - e; r.r = e * 0.35 * (i % 2 ? 1 : -1); break;
+          case 'up': r.dy = (r.dy || 0) - e * S * 0.5; r.a *= 1 - e; break;
+          case 'fade': r.a *= 1 - e; break;
+          case 'mask': r.dy = (r.dy || 0) - E.inExpo(q) * S * 1.15; break;
+        }
+      }
+    }
+    return o.extra ? Object.assign(r, o.extra(i, n, ch, r)) : r;
+  };
+}
+// 지정 영역 안에서만 보이게(마스크 리빌)
+function clipRect(x, y, w, h, draw) {
+  ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); draw(); ctx.restore();
+}
+function pill(text, x, y, size, weight, st) {
+  if ((st.alpha ?? 1) <= 0.002) return;
+  ctx.save();
+  ctx.translate(x, y);
+  if (st.rot) ctx.rotate(st.rot);
+  if (st.scale && st.scale !== 1) ctx.scale(st.scale, st.scale);
+  ctx.font = F(weight, size);
+  const tw = ctx.measureText(text).width, padX = size * 0.62, h = size * 1.62;
+  const al = st.alpha ?? 1;
+  if (st.fillA > 0) {
+    ctx.globalAlpha = al * st.fillA; ctx.fillStyle = st.fill;
+    ctx.beginPath(); ctx.roundRect(-tw / 2 - padX, -h / 2, tw + padX * 2, h, h / 2); ctx.fill();
+  }
+  if (st.strokeA > 0) {
+    ctx.globalAlpha = al * st.strokeA; ctx.strokeStyle = st.stroke; ctx.lineWidth = st.lw || 2;
+    ctx.beginPath(); ctx.roundRect(-tw / 2 - padX, -h / 2, tw + padX * 2, h, h / 2); ctx.stroke();
+  }
+  ctx.globalAlpha = al; ctx.fillStyle = st.text;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 0, size * 0.04);
+  ctx.restore();
+  return tw + padX * 2;
+}
+function pillWidth(text, size, weight) {
+  ctx.save(); ctx.font = F(weight, size); const w = ctx.measureText(text).width; ctx.restore();
+  return w + size * 0.62 * 2;
+}
+// 오도미터 숫자 한 칸(v는 연속값, 정수에서 멈춘다)
+function rollDigit(v, cx, y, size, weight, color, top, bot, alpha = 1, yoff = 0) {
+  const lh = size * 0.95, b = Math.floor(v), f = v - b;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(cx - size * 0.5, top, size, bot - top); ctx.clip();
+  ctx.font = F(weight, size); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = color; ctx.globalAlpha = alpha;
+  for (let k = 0; k <= 1; k++) {
+    const d = (((b + k) % 10) + 10) % 10;
+    ctx.fillText(String(d), cx, y + yoff + (k - f) * lh);
+  }
+  ctx.restore();
+}
+
+// ---------- 공용 소재 ----------
+const rng = mulberry32(1994);
+const KW = ['리더십', '온보딩', '직무역량', '조직문화', 'AI 활용', '성과관리', '코칭', '커뮤니케이션',
+  '팔로워십', '핵심가치', '문제해결', '세대공감', '리텐션', '변화관리', '팀워크', '면접관 교육'];
+const PAL = ['signal', 'cobalt', 'ochre'];
+const KWS = KW.map((w, i) => {
+  const ang = rng() * TAU, sp = 45 + rng() * 80;
+  return {
+    w, i, x0: rng() * W, y0: rng() * H, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+    r0: (rng() - 0.5) * 0.9, om: (rng() - 0.5) * 0.5,
+    size: Math.round(34 + rng() * 26), weight: Math.round(300 + rng() * 550),
+    style: i % 3, col: PAL[(i * 7) % 3], s: 7.7 + i * 0.55,
+  };
+});
+const SHAPES = ['line', 'disc', 'ring', 'arc', 'square', 'line'];
+const SH = Array.from({ length: 34 }, (_, j) => {
+  const ang = rng() * TAU, sp = 30 + rng() * 90;
+  return {
+    type: SHAPES[j % 6], x0: rng() * W, y0: rng() * H, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+    r0: rng() * TAU, om: (rng() - 0.5) * 1.8, size: 10 + rng() * 46,
+    col: ['paper', 'signal', 'cobalt', 'ochre'][Math.floor(rng() * 4)], s: 7.5 + j * 0.3,
+  };
+});
+function drawShape(type, x, y, rot, size, col, alpha, scale = 1) {
+  if (alpha <= 0.002) return;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(scale, scale); ctx.globalAlpha *= alpha;
+  ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineCap = 'round';
+  switch (type) {
+    case 'line': ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-size * 1.6, 0); ctx.lineTo(size * 1.6, 0); ctx.stroke(); break;
+    case 'disc': ctx.beginPath(); ctx.arc(0, 0, size * 0.42, 0, TAU); ctx.fill(); break;
+    case 'ring': ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, size * 0.5, 0, TAU); ctx.stroke(); break;
+    case 'arc': ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(0, 0, size * 0.6, 0, Math.PI * 0.9); ctx.stroke(); break;
+    case 'square': ctx.fillRect(-size * 0.3, -size * 0.3, size * 0.6, size * 0.6); break;
+  }
+  ctx.restore();
+}
+
+// ================= S0 진자: 질문 (0 – 7.5s) =================
+function S0(t) {
+  bg(C.paper);
+  const px = 1400, py = -10, L = 620;
+  const drop = E.outCubic(prog(t, 0.2, 1.0));
+  const A = 0.42 * E.inOutCubic(prog(t, 0.9, 2.0));
+  const th = A * Math.cos(Math.PI * (t - 1.0)); // 정수 초마다 끝점(틱)
+  const len = L * drop;
+  const bx = px + Math.sin(th) * len, by = py + Math.cos(th) * len;
+
+  // 궤적 가이드와 눈금자
+  const g = E.outCubic(prog(t, 1.2, 2.2));
+  ring(px, py, L, C.rule, 2, g, Math.PI / 2 - A, Math.PI / 2 + A, [2, 10]);
+  for (const s of [-1, 1]) {
+    const a = Math.PI / 2 + s * A;
+    line(px + Math.cos(a) * (L - 16), py + Math.sin(a) * (L - 16), px + Math.cos(a) * (L + 16), py + Math.sin(a) * (L + 16), C.graphite, 2, g);
+  }
+  const rp = E.outCubic(prog(t, 0.5, 1.6));
+  const rx0 = 190, rx1 = 1730, ry = 930;
+  line(rx0, ry, lerp(rx0, rx1, rp), ry, C.ink, 2, 0.9);
+  for (let x = rx0, k = 0; x <= lerp(rx0, rx1, rp); x += 32, k++) line(x, ry, x, ry - (k % 5 ? 10 : 24), C.ink, 1.5, 0.7);
+  if (drop > 0) {
+    ctx.save(); ctx.fillStyle = C.signal; ctx.globalAlpha = drop;
+    ctx.beginPath(); ctx.moveTo(bx, ry - 30); ctx.lineTo(bx - 10, ry - 48); ctx.lineTo(bx + 10, ry - 48); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  // 텍스트
+  const out = 6.55;
+  kText('직원 교육,', 190, 470, { size: 156, weight: 820 }, anim(t, 1.5, out, { type: 'rise', size: 156, weight: 820, gap: 0.07, dur: 0.7, outType: 'up' }));
+  kText('어디서부터', 196, 622, { size: 84, weight: 420, color: C.graphite }, anim(t, 3.5, out, { type: 'rise', size: 84, weight: 420, gap: 0.05, dur: 0.55, outType: 'up' }));
+  kText('시작해야 할까?', 196, 732, { size: 84, weight: 420, color: C.graphite }, anim(t, 4.5, out, {
+    type: 'rise', size: 84, weight: 420, gap: 0.05, dur: 0.55, outType: 'up',
+    extra: (i, n, ch, r) => {
+      if (ch.c !== '?') return {};
+      const rr = th * 1.1, h = 62;
+      return { r: rr, dx: 16 - h * Math.sin(rr), dy: (r.dy || 0) - h * (1 - Math.cos(rr)), color: C.signal, w: 700 };
+    },
+  }));
+
+  // 진자
+  if (len > 1) {
+    line(px, py, bx, by, C.ink, 2);
+    disc(px, 0, 7, C.ink);
+    const bob = 46 * E.outBack(prog(t, 0.6, 1.1));
+    // 전환: 추가 잉크 원으로 화면을 덮는다
+    const w = prog(t, 6.75, 7.5);
+    if (w > 0) disc(bx, by, lerp(46, 2400, E.inExpo(w)), C.ink);
+    disc(bx, by, bob, mix(C.signal, C.ink, prog(t, 6.75, 7.05)));
+  }
+}
+
+// ================= S1 혼돈: 문제 제기 (7.5 – 21s) =================
+function tau(t) { const tc = Math.min(t, 20); const p = prog(tc, 14, 20); return (tc - 7.5) + 9 * p * p * p; }
+function kwPos(k, t) {
+  const T = tau(t);
+  return { x: wrap(k.x0 + k.vx * T, -240, W + 240), y: wrap(k.y0 + k.vy * T, -130, H + 130), r: k.r0 + k.om * T };
+}
+function shPos(s, t) {
+  const T = tau(t);
+  return { x: wrap(s.x0 + s.vx * T * 1.3, -150, W + 150), y: wrap(s.y0 + s.vy * T * 1.3, -150, H + 150), r: s.r0 + s.om * T };
+}
+function kwStyle(k) {
+  if (k.style === 0) return { fillA: 0, stroke: C.paper, strokeA: 0.7, text: C.paper, fill: C.ink };
+  if (k.style === 1) return { fillA: 1, fill: C[k.col], strokeA: 0, stroke: C.paper, text: k.col === 'ochre' ? C.ink : C.paper };
+  return { fillA: 0, fill: C.ink, strokeA: 0, stroke: C.paper, text: C.paper };
+}
+function drawChaos(t, exit = 0, skip) {
+  for (const s of SH) {
+    const a = E.outCubic(prog(t, s.s, s.s + 0.6));
+    if (a <= 0) continue;
+    let { x, y, r } = shPos(s, t);
+    if (exit > 0) { const dx = x - W / 2, dy = y - H / 2, d = Math.hypot(dx, dy) || 1; x += dx / d * 900 * E.inCubic(exit); y += dy / d * 900 * E.inCubic(exit); }
+    drawShape(s.type, x, y, r, s.size, C[s.col], a * (1 - exit) * 0.9, lerp(0.85, 1, a));
+  }
+  for (const k of KWS) {
+    if (skip && skip.has(k.i)) continue;
+    const a = E.outCubic(prog(t, k.s, k.s + 0.5));
+    if (a <= 0) continue;
+    let { x, y, r } = kwPos(k, t);
+    if (exit > 0) { const dx = x - W / 2, dy = y - H / 2, d = Math.hypot(dx, dy) || 1; x += dx / d * 900 * E.inCubic(exit); y += dy / d * 900 * E.inCubic(exit); }
+    pill(k.w, x, y, k.size, k.weight, { ...kwStyle(k), rot: r, scale: lerp(0.9, 1, a), alpha: a * (1 - exit) });
+  }
+}
+function S1(t) {
+  bg(C.ink);
+  const amp = t < 20 ? 7 * E.inCubic(prog(t, 17.4, 20)) : 0;
+  ctx.save();
+  ctx.translate(Math.sin(t * 53.1) * amp, Math.cos(t * 47.7) * amp);
+  drawChaos(t);
+  ctx.restore();
+
+  const halo = [C.ink, 30];
+  if (t < 11.2) kText('교육 과정은 늘어나는데', W / 2, 575, { size: 112, weight: 800, color: C.paper, align: 'center', halo },
+    anim(t, 8.5, 10.7, { type: 'slide', size: 112, weight: 800, gap: 0.035, dur: 0.6, outType: 'fall' }));
+  if (t > 11.3 && t < 14.4) kText('성과는 왜 [그대로]일까', W / 2, 575, { size: 112, weight: 800, color: C.paper, align: 'center', halo },
+    anim(t, 11.5, 13.8, { type: 'drop', size: 112, weight: 800, gap: 0.045, dur: 0.6, outType: 'fall' }));
+  if (t > 14.3 && t < 18.6) {
+    const sep = 230 * E.inOutCubic(prog(t, 16.0, 17.5));
+    const y = 575, lx = W / 2 - 40 - sep, rx = W / 2 + 40 + sep;
+    // 둘을 잇는 선: 늘어나다 끊어진다
+    const lp = E.outExpo(prog(t, 15.6, 15.95));
+    const snap = E.outExpo(prog(t, 17.5, 17.85));
+    if (lp > 0 && t < 17.95) {
+      const ly = y - 40, a = lx + 16, b = rx - 16, mid = (a + b) / 2;
+      const al = 1 - prog(t, 17.6, 17.95);
+      if (snap <= 0) line(a, ly, lerp(a, b, lp), ly, C.signal, 5);
+      else {
+        line(a, ly, lerp(mid - 6, a, snap), ly + 30 * snap, C.signal, 5, al);
+        line(lerp(mid + 6, b, snap), ly - 30 * snap, b, ly, C.signal, 5, al);
+      }
+    }
+    kText('교육 따로,', lx, y, { size: 124, weight: 900, color: C.paper, align: 'right', halo },
+      anim(t, 14.5, 17.9, { type: 'slam', size: 124, weight: 900, gap: 0.03, dur: 0.5, outType: 'fall' }));
+    kText('현장 따로.', rx, y, { size: 124, weight: 900, color: C.paper, align: 'left', halo },
+      anim(t, 15.4, 17.9, { type: 'slam', size: 124, weight: 900, gap: 0.03, dur: 0.5, outType: 'fall' }));
+  }
+}
+
+// ================= S2 정렬: 전환점 (21 – 29s) =================
+const LINE_KW = [0, 1, 2, 3, 4, 5, 6, 7];
+const LINE_Y = 540;
+let lineSlots = null;
+function getSlots() {
+  if (lineSlots) return lineSlots;
+  const ws = LINE_KW.map(i => pillWidth(KW[i], 30, 600));
+  const total = ws.reduce((a, b) => a + b, 0);
+  const gap = (1720 - total) / (LINE_KW.length - 1);
+  let x = 100;
+  lineSlots = ws.map(w => { const c = x + w / 2; x += w + gap; return { x: c, w }; });
+  lineSlots.gap = gap;
+  return lineSlots;
+}
+const RC = { x: 560, y: 560, R: 300 };
+function morphLine(e, col, lw) {
+  const N = 240;
+  ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let i = 0; i <= N; i++) {
+    const u = i / N;
+    const lx = lerp(-20, W + 20, u), ly = LINE_Y;
+    const a = -Math.PI / 2 + TAU * u;
+    const cx = RC.x + RC.R * Math.cos(a), cy = RC.y + RC.R * Math.sin(a);
+    const x = lerp(lx, cx, e), y = lerp(ly, cy, e);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.stroke(); ctx.restore();
+}
+function S2(t) {
+  bg(C.paper);
+  // 잉크 화면이 선을 따라 위아래로 갈라진다
+  const sp = E.inOutCubic(prog(t, 21.35, 22.3));
+  if (sp < 1) {
+    ctx.fillStyle = C.ink;
+    ctx.fillRect(0, -sp * 600, W, LINE_Y);
+    ctx.fillRect(0, LINE_Y + sp * 600, W, H - LINE_Y);
+  }
+  const skip = new Set(LINE_KW);
+  if (t < 22.2) drawChaos(20, prog(t, 21.05, 21.9), skip);
+
+  // 빨간 선
+  const lp = E.outExpo(prog(t, 21.0, 21.4));
+  const me = E.inOutCubic(prog(t, 28.0, 29.0));
+  if (me <= 0) line(-20, LINE_Y, lerp(-20, W + 20, lp), LINE_Y, C.signal, 4);
+  else morphLine(me, C.signal, 4);
+
+  // 키워드가 선 위로 날아와 구슬처럼 꿰인다
+  const slots = getSlots();
+  const outP = prog(t, 27.5, 28.0);
+  LINE_KW.forEach((ki, j) => {
+    const k = KWS[ki];
+    const p = E.inOutCubic(prog(t, 21.3 + j * 0.05, 22.4 + j * 0.05));
+    const from = kwPos(k, 20), to = slots[j];
+    const x = lerp(from.x, to.x, p), y = lerp(from.y, LINE_Y, p) - Math.sin(p * Math.PI) * 90;
+    const s0 = kwStyle(k);
+    const size = lerp(k.size, 30, p), weight = lerp(k.weight, 600, p);
+    pill(k.w, x, y, Math.round(size), weight, {
+      fill: mix(s0.fillA ? s0.fill : C.paper, C.paper, p), fillA: lerp(s0.fillA, 1, p),
+      stroke: mix(s0.stroke, C.ink, p), strokeA: lerp(s0.strokeA, 1, p),
+      text: mix(s0.text, C.ink, p), rot: lerp(from.r, 0, p),
+      alpha: 1 - outP, scale: 1 - 0.1 * outP,
+    });
+  });
+  // 연결 노드
+  for (let j = 0; j < slots.length - 1; j++) {
+    const x = (slots[j].x + slots[j].w / 2 + slots[j + 1].x - slots[j + 1].w / 2) / 2;
+    const r = 8 * E.outBack(prog(t, 22.6 + j * 0.06, 23.0 + j * 0.06));
+    disc(x, LINE_Y, Math.max(0, r), C.signal, 1 - outP);
+  }
+  kText('필요한 건 더 많은 과정이 아니라', W / 2, 372, { size: 64, weight: 500, align: 'center', color: C.graphite },
+    anim(t, 23.0, 27.7, { type: 'rise', size: 64, weight: 500, gap: 0.03, dur: 0.55, outType: 'up' }));
+  const hi = anim(t, 25.4, 27.8, { type: 'slam', size: 156, weight: 900, gap: 0.08, dur: 0.6, outType: 'fall' });
+  const lo = anim(t, 24.5, 27.8, { type: 'rise', size: 156, weight: 900, gap: 0.05, dur: 0.6, outType: 'fall' });
+  kText('하나로 연결된 [설계]', W / 2, 805, { size: 156, weight: 900, align: 'center' }, (i, n, ch) => (ch.acc ? hi : lo)(i, n, ch));
+}
+
+// ================= S3 고리: Total HR 흐름 (29 – 52.3s) =================
+const ST = [
+  { name: '채용', verb: '인재를 알아보는 일부터', tags: ['채용 컨설팅', '블라인드 채용'], col: 'signal' },
+  { name: '진단·평가', verb: '정확히 진단하고', tags: ['BDPI', 'K-FIT', '역량평가센터'], col: 'cobalt' },
+  { name: 'HRD 컨설팅', verb: '교육체계를 설계하고', tags: ['직무·역량 기반 교육체계'], col: 'ochre' },
+  { name: '집합교육', verb: '현장에서 함께 배우고', tags: ['리더십', '직무', '조직활성화'], col: 'ink' },
+  { name: '이러닝', verb: '언제 어디서나 이어가고', tags: ['원격교육', '콘텐츠 개발'], col: 'signal' },
+  { name: '연수원', verb: '몰입하는 배움의 공간까지', tags: [], col: 'cobalt' },
+];
+const T0 = 31, STEP = 3, TH0 = -Math.PI / 2, PX0 = 1080;
+const actT = k => T0 + k * STEP;
+function ballAngle(t) {
+  if (t < T0) return TH0;
+  const k = Math.floor((t - T0) / STEP);
+  const local = t - actT(Math.min(k, 5));
+  if (k <= 4) return TH0 + (k + E.inOutCubic(prog(local, 1.9, 3.0))) * Math.PI / 3;
+  if (k === 5) return TH0 + (5 + E.inOutCubic(prog(local, 1.0, 3.0))) * Math.PI / 3;
+  return TH0 + TAU + TAU * 2 * E.inCubic(prog(t, 49.3, 51.5));
+}
+const HOOK = { x: 1390, y: 150 };
+function ballPos(t) {
+  if (t < 30) return null;
+  if (t < 31) return { x: RC.x, y: lerp(-80, RC.y - RC.R, E.outBounce(prog(t, 30.0, 31.0))), r: 17 };
+  if (t < 51.5) { const a = ballAngle(t); return { x: RC.x + RC.R * Math.cos(a), y: RC.y + RC.R * Math.sin(a), r: 17 }; }
+  const p = E.outCubic(prog(t, 51.5, 52.3));
+  const P0 = { x: RC.x, y: RC.y - RC.R }, P1 = { x: 1050, y: RC.y - RC.R - 40 }, P2 = HOOK;
+  const u = 1 - p;
+  return { x: u * u * P0.x + 2 * u * p * P1.x + p * p * P2.x, y: u * u * P0.y + 2 * u * p * P1.y + p * p * P2.y, r: lerp(17, 11, p) };
+}
+function S3(t) {
+  bg(C.paper);
+  const gOut = E.inCubic(prog(t, 51.3, 52.0));
+  const ga = 1 - gOut;
+  ctx.save();
+  ctx.translate(RC.x, RC.y); ctx.scale(1 - 0.08 * gOut, 1 - 0.08 * gOut); ctx.translate(-RC.x, -RC.y);
+  ctx.globalAlpha = ga;
+
+  // 동심 키네틱 링
+  const r1 = E.outCubic(prog(t, 29.2, 30.4)), r2 = E.outCubic(prog(t, 29.4, 30.6)), r3 = E.outCubic(prog(t, 29.6, 30.8));
+  const rot = t * 0.15;
+  ring(RC.x, RC.y, 236, C.graphite, 2, 0.8, rot, rot + TAU * r1, [2, 12]);
+  ring(RC.x, RC.y, 180, C.ink, 1.5, 0.9, -t * 0.2, -t * 0.2 + TAU * r2);
+  [[0.5, 'cobalt', 9, 0], [-0.35, 'ochre', 8, 2], [0.8, 'ink', 6, 4]].forEach(([w, c, r, ph]) => {
+    const a = ph + t * w;
+    disc(RC.x + 180 * Math.cos(a), RC.y + 180 * Math.sin(a), r * r2, C[c]);
+  });
+  ring(RC.x, RC.y, 122, C.ochre, 11, r3, -t * 0.6, -t * 0.6 + Math.PI / 2 * r3);
+  ring(RC.x, RC.y, 122, C.cobalt, 11, r3, t * 0.9 + 2, t * 0.9 + 2 + 0.7 * r3);
+  kText('Total HR', RC.x, RC.y + 6, { size: 40, weight: 820, align: 'center' }, anim(t, 29.8, null, { type: 'rise', size: 40, weight: 820, gap: 0.04 }));
+  kText('PROFESSIONAL', RC.x, RC.y + 42, { size: 15, weight: 650, align: 'center', track: 0.32, color: C.graphite }, anim(t, 30.2, null, { type: 'rise', size: 15, weight: 650, gap: 0.02 }));
+
+  // 기본 링 + 진행 호
+  const morphDone = prog(t, 29.0, 29.6);
+  ring(RC.x, RC.y, RC.R, mix(C.signal, C.ink, morphDone), lerp(4, 2, morphDone));
+  const ba = Math.min(ballAngle(t), TH0 + TAU);
+  if (t >= T0 && ba > TH0 + 0.001) ring(RC.x, RC.y, RC.R, C.signal, 7, 1, TH0, ba);
+  if (t >= 49) ring(RC.x, RC.y, RC.R, C.signal, 7);
+
+  // 스테이션
+  ST.forEach((s, k) => {
+    const a = TH0 + k * Math.PI / 3, dx = Math.cos(a), dy = Math.sin(a);
+    const x = RC.x + RC.R * dx, y = RC.y + RC.R * dy;
+    const app = E.outBack(prog(t, 29.6 + k * 0.08, 30.1 + k * 0.08));
+    const act = prog(t, actT(k), actT(k) + 0.5);
+    const pulse = prog(t, actT(k), actT(k) + 0.7);
+    if (pulse > 0 && pulse < 1) ring(x, y, lerp(22, 74, E.outCubic(pulse)), C[s.col], 3, 1 - pulse);
+    const r = lerp(9, 24, E.outBack(act)) * app;
+    disc(x, y, r, act > 0 ? C[s.col] : C.paper);
+    if (act <= 0) ring(x, y, r, C.ink, 2);
+    else disc(x, y, 5 * act, C.paper);
+    // 라벨
+    const lx = RC.x + (RC.R + 52) * dx, ly = RC.y + (RC.R + 52) * dy;
+    const align = dx > 0.3 ? 'left' : dx < -0.3 ? 'right' : 'center';
+    const yy = ly + (dy < -0.9 ? -6 : dy > 0.9 ? 22 : 10);
+    kText(s.name, lx, yy, { size: 29, weight: lerp(420, 820, act), align, color: mix(C.graphite, C.ink, act), alpha: app });
+  });
+
+  // 공
+  for (let j = 8; j >= 0; j--) {
+    const b = ballPos(t - j * 0.03);
+    if (!b || (t - j * 0.03) >= 51.5) continue;
+    disc(b.x, b.y, b.r * (1 - j * 0.07), C.signal, j ? 0.22 * (1 - j / 9) : 1);
+  }
+  ctx.restore();
+  const b = ballPos(t);
+  if (b && t >= 51.5) disc(b.x, b.y, b.r, C.signal);
+
+  // 오른쪽 패널
+  const hp = E.outExpo(prog(t, 30.4, 31.0)), ho = 1 - prog(t, 48.5, 48.9);
+  if (hp > 0 && ho > 0) {
+    ctx.save(); ctx.globalAlpha = ho;
+    ctx.fillStyle = C.signal; ctx.fillRect(PX0, 228, 46 * hp, 5);
+    kText('TOTAL HR FLOW', PX0 + 62, 240, { size: 20, weight: 700, track: 0.34, color: C.graphite, alpha: hp });
+    // 인덱스 오도미터
+    let v = 0;
+    for (let k = 0; k <= 5; k++) v += E.inOutCubic(prog(t, actT(k) - 0.35, actT(k) + 0.1));
+    rollDigit(0, PX0 + 52, 440, 170, 200, C.ink, 280, 470, hp);
+    rollDigit(v, PX0 + 152, 440, 170, 200, C.ink, 280, 470, hp);
+    kText('/ 06', PX0 + 250, 440, { size: 32, weight: 500, color: C.graphite, alpha: hp });
+    ctx.restore();
+  }
+  ST.forEach((s, k) => {
+    const a = actT(k);
+    if (t < a - 0.05 || t > a + 3.05) return;
+    const o = a + 2.62;
+    clipRect(PX0 - 10, 580 - 110, 900, 140, () =>
+      kText(s.name, PX0, 580, { size: 104, weight: 860 }, anim(t, a + 0.05, o, { type: 'mask', size: 104, weight: 860, gap: 0.035, dur: 0.6, outType: 'mask', outDur: 0.32 })));
+    clipRect(PX0 - 10, 662 - 52, 900, 66, () =>
+      kText(s.verb, PX0 + 2, 662, { size: 46, weight: 420, color: C.graphite }, anim(t, a + 0.18, o + 0.04, { type: 'mask', size: 46, weight: 420, gap: 0.018, dur: 0.6, outType: 'mask', outDur: 0.3 })));
+    let x = PX0;
+    s.tags.forEach((tag, j) => {
+      const w = pillWidth(tag, 26, 620);
+      const p = E.outBack(prog(t, a + 0.4 + j * 0.09, a + 0.8 + j * 0.09));
+      const q = prog(t, o, o + 0.25);
+      pill(tag, x + w / 2, 752, 26, 620, { fillA: 0, strokeA: 1, stroke: C.ink, lw: 1.6, text: C.ink, alpha: clamp(p) * (1 - q), scale: lerp(0.85, 1, p) });
+      x += w + 14;
+    });
+  });
+  if (t > 48.9) {
+    kText('채용에서 성장까지,', PX0, 520, { size: 64, weight: 420, color: C.graphite }, anim(t, 49.0, 51.1, { type: 'rise', size: 64, weight: 420, gap: 0.035, outType: 'up' }));
+    kText('하나의 [흐름]으로.', PX0, 664, { size: 100, weight: 900 }, anim(t, 49.5, 51.15, { type: 'rise', size: 100, weight: 900, gap: 0.05, outType: 'up' }));
+  }
+}
+
+// ================= S4 모빌: 계층과 균형 (52.3 – 63s) =================
+function S4(t) {
+  bg(C.paper);
+  const lift = -1050 * E.inCubic(prog(t, 61.9, 62.9));
+  ctx.save(); ctx.translate(0, lift);
+  const aA = 0.16 * damped(t, 52.8, 3.2, 0.9) + 0.10 * damped(t, 54.0, 3.2, 0.9) + 0.06 * damped(t, 55.2, 3.2, 0.9) + 0.012 * Math.sin(1.3 * t);
+  const aB = -0.18 * damped(t, 54.0, 3.8, 1.0) - 0.08 * damped(t, 55.2, 3.8, 1.0) + 0.015 * Math.sin(1.7 * t + 1);
+  const aC = 0.22 * damped(t, 55.2, 4.4, 1.1) + 0.018 * Math.sin(2.1 * t + 2);
+  const sg = E.outCubic(prog(t, 52.3, 52.7));
+  const PA = { x: HOOK.x, y: HOOK.y + 150 };
+  line(HOOK.x, HOOK.y, HOOK.x, lerp(HOOK.y, PA.y, sg), C.ink, 1.6);
+  const beam = (P, a, l, r, app, col = C.ink) => {
+    const c = Math.cos(a), s = Math.sin(a);
+    const L = { x: P.x - l * c * app, y: P.y - l * s * app }, R = { x: P.x + r * c * app, y: P.y + r * s * app };
+    if (app > 0) { line(L.x, L.y, R.x, R.y, col, 5); disc(P.x, P.y, 5, col); }
+    return { L, R };
+  };
+  const hang = (P, len, app, r, col, label, ls, tc) => {
+    if (app <= 0) return;
+    const yy = P.y + len * Math.min(1, app * 1.4);
+    line(P.x, P.y, P.x, yy, C.ink, 1.6);
+    const rr = r * E.outBack(prog(app, 0.3, 1));
+    disc(P.x, yy + rr, rr, col);
+    if (label && rr > 4) kText(label, P.x, yy + rr + ls * 0.36, { size: ls, weight: 820, align: 'center', color: tc, alpha: prog(app, 0.6, 1) });
+  };
+  const apA = E.outBack(prog(t, 52.6, 53.1)), apB = E.outBack(prog(t, 53.8, 54.3)), apC = E.outBack(prog(t, 55.0, 55.5));
+  const A = beam(PA, aA, 380, 210, apA);
+  hang(A.L, 120, prog(t, 52.9, 53.5), 64, C.ink, '임원', 34, C.paper);
+  const sB = prog(t, 53.4, 53.8);
+  const PB = { x: A.R.x, y: A.R.y + 190 * sB };
+  if (apA > 0.5 && sB > 0) line(A.R.x, A.R.y, PB.x, PB.y, C.ink, 1.6);
+  const B = beam(PB, aB, 270, 160, apB);
+  hang(B.R, 110, prog(t, 54.1, 54.7), 78, C.signal, '팀장', 38, C.paper);
+  const sC = prog(t, 54.6, 55.0);
+  const PC = { x: B.L.x, y: B.L.y + 170 * sC };
+  if (apB > 0.5 && sC > 0) line(B.L.x, B.L.y, PC.x, PC.y, C.ink, 1.6);
+  const Cb = beam(PC, aC, 210, 170, apC);
+  hang(Cb.L, 110, prog(t, 55.3, 55.9), 58, C.ochre, '신입', 30, C.ink);
+  hang(Cb.R, 90, prog(t, 55.5, 56.1), 30, C.cobalt);
+  disc(HOOK.x, HOOK.y, 11, C.signal);
+  ctx.restore();
+
+  const out = 61.4;
+  kText('임원부터 팀장, 신입까지', 140, 330, { size: 50, weight: 420, color: C.graphite }, anim(t, 53.0, out, { type: 'rise', size: 50, weight: 420, gap: 0.035, outType: 'up' }));
+  kText('직급마다 다른', 140, 474, { size: 100, weight: 850 }, anim(t, 55.8, out + 0.08, { type: 'rise', size: 100, weight: 850, gap: 0.05, outType: 'up' }));
+  kText('성장의 무게를', 140, 604, { size: 100, weight: 850 }, anim(t, 56.6, out + 0.16, { type: 'rise', size: 100, weight: 850, gap: 0.05, outType: 'up' }));
+  const hi = anim(t, 58.8, out + 0.24, { type: 'slam', size: 100, weight: 900, gap: 0.08, dur: 0.55, outType: 'up' });
+  const lo = anim(t, 58.3, out + 0.24, { type: 'rise', size: 100, weight: 900, gap: 0.05, outType: 'up' });
+  kText('하나의 [균형]으로.', 140, 760, { size: 100, weight: 900 }, (i, n, ch) => (ch.acc ? hi : lo)(i, n, ch));
+}
+
+// ================= S5 증명: 숫자 (63 – 74s) =================
+function bridgeText(t) {
+  const pull = (i, n, ch, r) => {
+    const q = E.inCubic(prog(t, 73.9 + ((i * 37) % 11) / 11 * 0.45, 75.0 + ((i * 53) % 7) / 7 * 0.25));
+    if (q <= 0) return {};
+    const rx = ch.ax - W / 2, ry = ch.ay - H / 2, ang = q * 2.4, sc = 1 - q;
+    const nx = (rx * Math.cos(ang) - ry * Math.sin(ang)) * sc, ny = (rx * Math.sin(ang) + ry * Math.cos(ang)) * sc;
+    return { dx: nx - rx, dy: ny - ry + (r.dy || 0) * (1 - q), s: 1 - 0.85 * q, r: q * 2.4, a: r.a * (1 - Math.pow(q, 4)) };
+  };
+  kText('교육의 성과는', W / 2, 420, { size: 64, weight: 420, align: 'center', color: C.paper }, anim(t, 71.0, null, { type: 'rise', size: 64, weight: 420, gap: 0.04, extra: pull }));
+  kText('누구와 [설계]하느냐에 따라', W / 2, 568, { size: 100, weight: 860, align: 'center', color: C.paper }, anim(t, 71.8, null, { type: 'rise', size: 100, weight: 860, gap: 0.04, extra: pull }));
+  kText('달라집니다.', W / 2, 700, { size: 100, weight: 860, align: 'center', color: C.paper }, anim(t, 72.6, null, { type: 'rise', size: 100, weight: 860, gap: 0.05, extra: pull }));
+}
+function S5(t) {
+  bg(C.paper);
+  const wp = E.outExpo(prog(t, 63.0, 63.6));
+  ctx.fillStyle = C.ink; ctx.fillRect(W * (1 - wp), 0, W * wp + 1, H);
+  const size = 320, y = 650, top = y - size * 0.86, bot = y + size * 0.1;
+
+  // 1994 → 2026
+  if (t < 68.4) {
+    const to1 = [1, 9, 9, 4], to2 = [2, 10, 12, 6];
+    const ex = E.inExpo(prog(t, 67.8, 68.3));
+    [0, 1, 2, 3].forEach(c => {
+      let v = to1[c] * E.outCubic(prog(t, 63.4 + c * 0.09, 64.5 + c * 0.09));
+      v += (to2[c] - to1[c]) * E.inOutCubic(prog(t, 65.0 + (3 - c) * 0.12, 66.5 + (3 - c) * 0.12));
+      rollDigit(v, W / 2 + (c - 1.5) * 205, y, size, 820, C.paper, top, bot, prog(t, 63.3, 63.5), -ex * 420);
+    });
+    kText('SINCE', W / 2, 310, { size: 26, weight: 700, align: 'center', track: 0.42, color: C.signal }, anim(t, 63.8, 67.6, { type: 'rise', size: 26, weight: 700, gap: 0.04, outType: 'up' }));
+    if (t < 66.9) kText('1994년 설립', W / 2, 800, { size: 52, weight: 500, align: 'center', color: C.paper, alpha: 0.82 }, anim(t, 64.4, 66.5, { type: 'rise', size: 52, weight: 500, gap: 0.04, outType: 'up' }));
+    kText('30년 넘게, HR 한 길', W / 2, 800, { size: 60, weight: 820, align: 'center', color: C.paper }, anim(t, 66.7, 67.75, { type: 'rise', size: 60, weight: 820, gap: 0.035, outType: 'up' }));
+  }
+  // 1,000+
+  if (t > 68.2 && t < 71.2) {
+    const N = 1000 * E.outCubic(prog(t, 68.4, 69.9));
+    const ap = prog(t, 68.3, 68.5) * (1 - prog(t, 70.6, 71.0));
+    const cw = size * 0.64, comma = size * 0.3, plusW = size * 0.62;
+    const total = cw * 4 + comma + plusW;
+    let x = W / 2 - total / 2;
+    const ex = -E.inExpo(prog(t, 70.6, 71.0)) * 420;
+    [1000, 100, 10, 1].forEach((pl, c) => {
+      rollDigit(N / pl, x + cw / 2, y, size, 820, C.paper, top, bot, ap, ex);
+      x += cw;
+      if (c === 0) {
+        ctx.save(); ctx.globalAlpha = ap; ctx.font = F(820, size); ctx.fillStyle = C.paper; ctx.textAlign = 'center';
+        clipRect(x, top, comma, bot - top + 60, () => ctx.fillText(',', x + comma / 2, y + ex));
+        ctx.restore(); x += comma;
+      }
+    });
+    const pp = prog(t, 69.85, 70.3);
+    if (pp > 0) {
+      ctx.save(); ctx.globalAlpha = ap; ctx.translate(x + plusW / 2, y - size * 0.3 + ex); ctx.scale(lerp(1.8, 1, E.outExpo(pp)), lerp(1.8, 1, E.outExpo(pp)));
+      ctx.font = F(820, size); ctx.fillStyle = C.signal; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('+', 0, 0); ctx.restore();
+    }
+    kText('EVERY YEAR', W / 2, 310, { size: 26, weight: 700, align: 'center', track: 0.42, color: C.signal }, anim(t, 68.6, 70.6, { type: 'rise', size: 26, weight: 700, gap: 0.03, outType: 'up' }));
+    kText('매년 함께하는 기업·공공기관', W / 2, 800, { size: 56, weight: 620, align: 'center', color: C.paper }, anim(t, 69.0, 70.55, { type: 'rise', size: 56, weight: 620, gap: 0.03, outType: 'up' }));
+  }
+  if (t > 70.9) bridgeText(t);
+}
+
+// ================= S6 수렴 → 브랜드 (74 – 88s) =================
+const VX = Array.from({ length: 150 }, (_, i) => {
+  const type = i < 32 ? 'kw' : i < 56 ? 'digit' : SHAPES[i % 6];
+  return {
+    type, text: type === 'kw' ? KW[i % KW.length] : String(Math.floor(rng() * 10)),
+    a0: rng() * TAU, r0: 640 + rng() * 700, s: 73.9 + rng() * 2.9,
+    size: type === 'kw' ? 30 + rng() * 18 : type === 'digit' ? 60 + rng() * 80 : 12 + rng() * 40,
+    col: ['paper', 'signal', 'cobalt', 'ochre', 'paper'][Math.floor(rng() * 5)], om: (rng() - 0.5) * 2,
+  };
+});
+let brand = null;
+function getBrand() {
+  if (brand) return brand;
+  const L2 = lay('엑스퍼트컨설팅', 190, 900, 0);
+  const r = 20, gap = 18, group = L2.width + gap + r * 2;
+  const x0 = W / 2 - group / 2;
+  brand = { r, x0, PX: x0 + L2.width + gap + r, PY: 640 - r, pivotY: -10 };
+  return brand;
+}
+function S6(t) {
+  const B = getBrand();
+  // 배경: 잉크 → (78.4) 종이 원이 번진다
+  bg(C.ink);
+  const pe = E.outExpo(prog(t, 78.4, 79.3));
+  if (pe > 0) disc(W / 2, H / 2, 1200 * pe, C.paper);
+
+  if (t < 78.1) {
+    const g = E.inCubic(prog(t, 74.3, 78.0));
+    for (let j = 1; j <= 6; j++) ring(W / 2, H / 2, j * 175 * (1 - 0.92 * g), C.paper, 1.5, 0.09, t * 0.3 * (j % 2 ? 1 : -1), t * 0.3 * (j % 2 ? 1 : -1) + TAU * 0.8, [3, 14]);
+    for (const v of VX) {
+      const p = prog(t, v.s, 78.0);
+      if (p <= 0) continue;
+      const e = Math.pow(p, 1.7), r = v.r0 * (1 - e), ang = v.a0 + 3.2 * e;
+      const x = W / 2 + r * Math.cos(ang), y = H / 2 + r * Math.sin(ang);
+      const sc = lerp(1, 0.1, e), al = clamp(p * 5) * (r < 40 ? r / 40 : 1);
+      if (v.type === 'kw') pill(v.text, x, y, Math.round(v.size), 600, { fillA: 0, strokeA: 0.8, stroke: C[v.col], text: C[v.col], rot: ang + Math.PI / 2, scale: sc, alpha: al });
+      else if (v.type === 'digit') {
+        ctx.save(); ctx.globalAlpha = al; ctx.translate(x, y); ctx.rotate(ang + Math.PI / 2); ctx.scale(sc, sc);
+        ctx.font = F(800, Math.round(v.size)); ctx.fillStyle = C[v.col]; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(v.text, 0, 0); ctx.restore();
+      } else drawShape(v.type, x, y, ang + v.om * t, v.size, C[v.col], al, sc);
+    }
+  }
+  if (t < 75.3) bridgeText(t);
+
+  // 붕괴 → 빨간 점
+  const birth = E.outBack(prog(t, 77.6, 78.15));
+  const sw = prog(t, 78.0, 78.7);
+  if (sw > 0 && sw < 1) ring(W / 2, H / 2, lerp(22, 760, E.outCubic(sw)), C.paper, 3, 1 - sw);
+
+  // 점이 마침표 자리로 이동, 진자처럼 매달렸다가 멈춘다
+  const mv = E.inOutCubic(prog(t, 78.7, 79.6));
+  const P0 = { x: W / 2, y: H / 2 }, P1 = { x: lerp(W / 2, B.PX, 0.5), y: H / 2 - 170 }, P2 = { x: B.PX, y: B.PY };
+  const u = 1 - mv;
+  let dx = u * u * P0.x + 2 * u * mv * P1.x + mv * mv * P2.x, dy = u * u * P0.y + 2 * u * mv * P1.y + mv * mv * P2.y;
+  const Lp = B.PY - B.pivotY;
+  if (t >= 79.6) {
+    const tt = t - 79.6;
+    const th = 0.2 * Math.exp(-2.4 * tt) * Math.sin(TAU * tt / 1.15) * (1 - E.inOutCubic(prog(t, 80.9, 81.4)));
+    dx = B.PX + Lp * Math.sin(th); dy = B.pivotY + Lp * Math.cos(th);
+  }
+  const sd = E.outCubic(prog(t, 79.3, 79.6));
+  if (sd > 0) {
+    const ret = E.inExpo(prog(t, 81.25, 81.55));
+    const endX = t >= 79.6 ? dx : B.PX, endY = t >= 79.6 ? dy : lerp(B.pivotY, B.PY, sd);
+    if (ret < 1) line(B.PX, B.pivotY, lerp(endX, B.PX, ret), lerp(endY, B.pivotY, ret), C.ink, 2);
+  }
+
+  // 최종 카드
+  const push = 1 + 0.014 * E.inOutCubic(prog(t, 81.5, 88));
+  ctx.save();
+  ctx.translate(W / 2, H / 2); ctx.scale(push, push); ctx.translate(-W / 2, -H / 2);
+  if (t > 79.9) {
+    kText('직원 교육 컨설팅은', W / 2, 440, { size: 76, weight: 430, align: 'center' }, anim(t, 80.0, null, { type: 'rise', size: 76, weight: 430, gap: 0.045, dur: 0.6 }));
+    const L2 = lay('엑스퍼트컨설팅', 190, 900, 0), mid = B.x0 + L2.width / 2;
+    kText('엑스퍼트컨설팅', B.x0, 640, { size: 190, weight: 900 }, (i, n, ch) => {
+      const p = cin(t, 81.5, i, n, 0.045, 0.7, 'center');
+      const e = E.outExpo(p);
+      return { a: clamp(p * 3), s: lerp(1.25, 1, e), w: lerp(90, 900, e), dx: -(ch.ax - mid) * 0.28 * (1 - e) };
+    });
+    const rl = E.outExpo(prog(t, 83.0, 83.8));
+    if (rl > 0) line(W / 2 - 290 * rl, 712, W / 2 + 290 * rl, 712, C.graphite, 1.5);
+    kText('TOTAL HR PROFESSIONAL  ·  SINCE 1994', W / 2, 776, { size: 24, weight: 650, align: 'center', track: 0.34, color: C.graphite },
+      anim(t, 83.3, null, { type: 'rise', size: 24, weight: 650, gap: 0.012, dur: 0.5 }));
+  }
+  ctx.restore();
+  // 점 (마침표)
+  for (const tp of [84.0, 86.0]) {
+    const q = prog(t, tp, tp + 1.8);
+    if (q > 0 && q < 1) ring(B.PX, B.PY, lerp(20, 90, E.outCubic(q)), C.signal, 2, 0.45 * (1 - q));
+  }
+  const pulse = 1 + 0.28 * Math.sin(Math.PI * prog(t, 81.55, 81.95));
+  const rr = lerp(22, B.r, prog(t, 78.7, 79.6)) * birth * pulse;
+  if (t >= 81.5) {
+    ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(push, push); ctx.translate(-W / 2, -H / 2);
+    disc(dx, dy, rr, C.signal); ctx.restore();
+  } else disc(dx, dy, rr, C.signal);
+}
+
+// ---------- 질감 ----------
+let grainPat = null;
+function makeGrain() {
+  const g = document.createElement('canvas'); g.width = g.height = 256;
+  const gx = g.getContext('2d'), id = gx.createImageData(256, 256), r = mulberry32(7);
+  for (let i = 0; i < id.data.length; i += 4) {
+    const v = r() < 0.5 ? 0 : 255;
+    id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = Math.floor(r() * 26);
+  }
+  gx.putImageData(id, 0, 0);
+  grainPat = ctx.createPattern(g, 'repeat');
+}
+// 종이 질감은 화면에 고정한다(인쇄물처럼 움직이지 않고, 인코딩 효율도 지킨다).
+function grain() {
+  ctx.save(); ctx.globalAlpha = 0.45; ctx.fillStyle = grainPat;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
+
+function render(t) {
+  t = clamp(t, 0, DUR);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  if (t < 7.5) S0(t);
+  else if (t < 21) S1(t);
+  else if (t < 29) S2(t);
+  else if (t < 52.3) S3(t);
+  else if (t < 63) S4(t);
+  else if (t < 74) S5(t);
+  else S6(t);
+  grain();
+}
+
+// ---------- 실행 ----------
+(async () => {
+  await loadTokens();
+  await Promise.all([document.fonts.load('900 100px Pretendard', '엑스퍼트'), document.fonts.load('400 100px Pretendard', '교육')]);
+  makeGrain();
+  window.renderFrame = render;
+  window.__meta = { W, H, FPS, DUR, font: document.fonts.check('900 100px Pretendard', '엑') };
+  window.__ready = true;
+  if (RENDER) { render(Number(new URLSearchParams(location.search).get('t') || 0)); return; }
+
+  const au = document.getElementById('au'), seek = document.getElementById('seek'), tc = document.getElementById('tc'), btn = document.getElementById('play');
+  let playing = false, t = 0, last = 0, hasAudio = false;
+  au.addEventListener('canplaythrough', () => { hasAudio = true; });
+  const fmt = v => v.toFixed(2).padStart(5, '0');
+  const draw = () => { render(t); seek.value = t; tc.textContent = `${fmt(t)} / ${DUR.toFixed(2)}`; };
+  const loop = now => {
+    if (!playing) return;
+    if (hasAudio && !au.paused) t = au.currentTime; else t += (now - last) / 1000;
+    last = now;
+    if (t >= DUR) { t = DUR; playing = false; btn.textContent = '▶'; au.pause(); }
+    draw();
+    if (playing) requestAnimationFrame(loop);
+  };
+  const toggle = () => {
+    playing = !playing;
+    btn.textContent = playing ? '❚❚' : '▶';
+    if (playing) {
+      if (t >= DUR) t = 0;
+      last = performance.now();
+      if (hasAudio) { au.currentTime = t; au.play().catch(() => {}); }
+      requestAnimationFrame(loop);
+    } else au.pause();
+  };
+  btn.addEventListener('click', toggle);
+  window.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); toggle(); } });
+  seek.addEventListener('input', () => { t = Number(seek.value); if (hasAudio) au.currentTime = t; draw(); });
+  draw();
+})();
+</script>
+</body>
+</html>
