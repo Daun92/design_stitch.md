@@ -16,7 +16,7 @@ const opt = name => { const i = args.indexOf(`--${name}`); return i < 0 ? null :
 const OUT = path.join(ROOT, 'out');
 fs.mkdirSync(OUT, { recursive: true });
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.woff2': 'font/woff2', '.wav': 'audio/wav', '.json': 'application/json' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.woff2': 'font/woff2', '.wav': 'audio/wav', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const server = http.createServer((req, res) => {
   const p = path.join(ROOT, decodeURIComponent(new URL(req.url, 'http://x').pathname));
   if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end(); return; }
@@ -36,12 +36,14 @@ async function openPage() {
   if (!meta.font) throw new Error('Pretendard 폰트를 불러오지 못했습니다. npm install 후 다시 실행하세요.');
   return { page, meta };
 }
+const logoNote = meta => console.log(meta.logo ? `엔딩 로고: ${meta.logo}` : '엔딩 로고 파일 없음(brand/) → 태그라인으로 렌더');
 const grab = (page, t) => page.evaluate(t => { window.renderFrame(t); return document.getElementById('c').toDataURL('image/jpeg', 0.95); }, t)
   .then(u => Buffer.from(u.slice(u.indexOf(',') + 1), 'base64'));
 
 const stills = opt('stills');
 if (stills) {
-  const { page } = await openPage();
+  const { page, meta } = await openPage();
+  logoNote(meta);
   const dir = path.join(OUT, 'stills');
   fs.mkdirSync(dir, { recursive: true });
   for (const s of stills.split(',').map(Number)) {
@@ -53,6 +55,7 @@ if (stills) {
   const workers = Number(process.env.WORKERS || 3);
   const pages = await Promise.all(Array.from({ length: workers }, openPage));
   const { FPS, DUR } = pages[0].meta;
+  logoNote(pages[0].meta);
   const from = Number(opt('from') ?? 0), to = Number(opt('to') ?? DUR);
   const first = Math.round(from * FPS), last = Math.round(to * FPS);
   const full = from === 0 && to === DUR;

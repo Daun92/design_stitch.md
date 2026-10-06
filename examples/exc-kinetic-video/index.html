@@ -20,7 +20,7 @@ body { display: flex; flex-direction: column; align-items: center; justify-conte
 canvas { display: block; width: min(100%, calc((100vh - 96px) * 16 / 9)); height: auto; aspect-ratio: 16 / 9; background: #F2EEE5; }
 .ui { display: flex; align-items: center; gap: 12px; width: min(100%, calc((100vh - 96px) * 16 / 9)); font-variant-numeric: tabular-nums; }
 .ui button { width: 44px; height: 32px; border: 1px solid #3a3d44; background: #1a1c21; color: var(--fg); border-radius: 6px; cursor: pointer; font: inherit; }
-.ui input { flex: 1; accent-color: #E0412B; }
+.ui input { flex: 1; accent-color: #009A5A; }
 .ui span { color: var(--mute); min-width: 92px; text-align: right; font-size: 14px; }
 body.render { padding: 0; display: block; }
 body.render .ui { display: none; }
@@ -45,7 +45,7 @@ const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
 
 // ---------- 토큰: DESIGN.md의 colors 블록을 읽어 덮어쓴다 ----------
-const C = { paper: '#F2EEE5', ink: '#15171C', signal: '#E0412B', cobalt: '#2347C6', ochre: '#EDB01F', graphite: '#6B6E75', rule: '#CFC8BA' };
+const C = { paper: '#F2EEE5', ink: '#15171C', signal: '#009A5A', cobalt: '#2347C6', ochre: '#EDB01F', graphite: '#6B6E75', rule: '#CFC8BA' };
 async function loadTokens() {
   try {
     const r = await fetch('DESIGN.md', { cache: 'no-store' });
@@ -59,6 +59,33 @@ async function loadTokens() {
       if (m && m[1] in C) C[m[1]] = m[2];
     }
   } catch (e) { /* 기본 팔레트 사용 */ }
+}
+
+// ---------- 로고: 사용자가 준 파일을 엔딩 카드에 작게 쓴다(brand/는 레포에 넣지 않는다) ----------
+const LOGO_W = 330; // DESIGN.md components.brand-logo.width
+let LOGO = null;
+async function loadLogo() {
+  for (const f of ['brand/logo.svg', 'brand/logo.png']) {
+    try {
+      const r = await fetch(f, { cache: 'no-store' });
+      if (!r.ok) continue;
+      let blob = await r.blob();
+      if (f.endsWith('.svg')) {
+        // SVG는 그릴 폭의 2배로 래스터화해 캔버스에서도 선명하게 한다.
+        const svg = new DOMParser().parseFromString(await blob.text(), 'image/svg+xml').documentElement;
+        const vb = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+        const w0 = vb.length === 4 ? vb[2] : parseFloat(svg.getAttribute('width'));
+        const h0 = vb.length === 4 ? vb[3] : parseFloat(svg.getAttribute('height'));
+        if (w0 > 0 && h0 > 0) { svg.setAttribute('width', LOGO_W * 2); svg.setAttribute('height', LOGO_W * 2 * h0 / w0); }
+        blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' });
+      }
+      const img = new Image();
+      img.src = URL.createObjectURL(blob);
+      await img.decode();
+      LOGO = { img, file: f };
+      return;
+    } catch (e) { /* 다음 후보를 보고, 없으면 태그라인을 쓴다 */ }
+  }
 }
 
 // ---------- 수학/이징 ----------
@@ -459,7 +486,7 @@ function S2(t) {
   const skip = new Set(LINE_KW);
   if (t < 22.2) drawChaos(20, prog(t, 21.05, 21.9), skip);
 
-  // 빨간 선
+  // 강조색 선
   const lp = E.outExpo(prog(t, 21.0, 21.4));
   const me = E.inOutCubic(prog(t, 28.0, 29.0));
   if (me <= 0) line(-20, LINE_Y, lerp(-20, W + 20, lp), LINE_Y, C.signal, 4);
@@ -774,7 +801,7 @@ function S6(t) {
   }
   if (t < 75.3) bridgeText(t);
 
-  // 붕괴 → 빨간 점
+  // 붕괴 → 강조색 점
   const birth = E.outBack(prog(t, 77.6, 78.15));
   const sw = prog(t, 78.0, 78.7);
   if (sw > 0 && sw < 1) ring(W / 2, H / 2, lerp(22, 760, E.outCubic(sw)), C.paper, 3, 1 - sw);
@@ -811,7 +838,16 @@ function S6(t) {
     });
     const rl = E.outExpo(prog(t, 83.0, 83.8));
     if (rl > 0) line(W / 2 - 290 * rl, 712, W / 2 + 290 * rl, 712, C.graphite, 1.5);
-    kText('TOTAL HR PROFESSIONAL  ·  SINCE 1994', W / 2, 776, { size: 24, weight: 650, align: 'center', track: 0.34, color: C.graphite },
+    if (LOGO) {
+      // 로고는 색과 비율을 바꾸지 않고 구분선 아래에 둔다. 태그라인 자리에서 83.3s에 떠오른다.
+      const lp = E.outExpo(prog(t, 83.3, 84.1));
+      if (lp > 0) {
+        const lh = LOGO_W * LOGO.img.naturalHeight / LOGO.img.naturalWidth;
+        ctx.save(); ctx.globalAlpha = clamp(lp * 1.5); ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(LOGO.img, W / 2 - LOGO_W / 2, 752 + 18 * (1 - lp), LOGO_W, lh);
+        ctx.restore();
+      }
+    } else kText('TOTAL HR PROFESSIONAL  ·  SINCE 1994', W / 2, 776, { size: 24, weight: 650, align: 'center', track: 0.34, color: C.graphite },
       anim(t, 83.3, null, { type: 'rise', size: 24, weight: 650, gap: 0.012, dur: 0.5 }));
   }
   ctx.restore();
@@ -864,10 +900,11 @@ function render(t) {
 // ---------- 실행 ----------
 (async () => {
   await loadTokens();
+  await loadLogo();
   await Promise.all([document.fonts.load('900 100px Pretendard', '엑스퍼트'), document.fonts.load('400 100px Pretendard', '교육')]);
   makeGrain();
   window.renderFrame = render;
-  window.__meta = { W, H, FPS, DUR, font: document.fonts.check('900 100px Pretendard', '엑') };
+  window.__meta = { W, H, FPS, DUR, font: document.fonts.check('900 100px Pretendard', '엑'), logo: LOGO ? LOGO.file : null };
   window.__ready = true;
   if (RENDER) { render(Number(new URLSearchParams(location.search).get('t') || 0)); return; }
 
