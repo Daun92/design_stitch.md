@@ -65,6 +65,7 @@ cd examples/exc-kinetic-video
 npm install                 # playwright-core, pretendard(폰트)
 npm run preview             # http://localhost:8080 에서 재생·스크럽
 npm run render              # bgm.wav 합성 → out/exc-kinetic.mp4
+npm run render:split        # C안(0–21초 빨강 → 21초 선부터 초록) → out/exc-kinetic-split.mp4
 node render.mjs --stills 12,50,82   # 특정 시각 PNG
 node render.mjs --from 29 --to 52   # 구간 미리보기(무음)
 ```
@@ -82,11 +83,11 @@ node render.mjs --from 29 --to 52   # 구간 미리보기(무음)
 | `NARRATION.md` | Eleven v4용 한국어 내레이션 대본(입력문, 큐 시트, 생성·배치·믹스 방법) |
 | `narration.json` | 같은 대본의 기계용 데이터(블록, 큐별 발화 시작·허용 창·대체 문구) |
 | `vo_sync.json` | 실제 Eleven v4 테이크를 큐별로 잘라 놓는 배치표(원본 구간 → 영상 시각, 믹스 설정) |
-| `mix-vo.mjs` | 배치표를 적용해 내레이션·덕킹 배경음을 섞고 `out/exc-kinetic-vo.mp4`를 만든다(`npm run mix`, 테이크는 `vo/`에 둔다) |
+| `mix-vo.mjs` | 배치표를 적용해 내레이션·덕킹 배경음을 섞고 `out/exc-kinetic-vo.mp4`를 만든다(`npm run mix`, 테이크는 `vo/`에 둔다). C안은 `npm run mix:split` → `out/exc-kinetic-split-vo.mp4` |
 | `brand/` | 사용자가 준 로고 파일 자리(`logo.svg` 또는 `logo.png`). git에서 제외한다 |
 
 ## 5. 바꾸기 쉬운 곳
 
-- **색:** `DESIGN.md`의 `colors` (paper, ink, signal, cobalt, ochre, graphite, rule).
+- **색:** `DESIGN.md`의 `colors` (paper, ink, signal, alert, cobalt, ochre, graphite, rule). `alert`는 C안(`--accent split`, 미리보기는 `?accent=split`)에서 문제 구간에만 쓴다.
 - **카피:** `index.html`의 각 장면 함수(S0–S6)에 있는 `kText(...)` 문자열. `[ ]`로 감싼 글자는 강조색이 된다.
 - **로고:** `brand/logo.svg` 또는 `brand/logo.png`. 엔딩 카드 구분선 아래에 폭 330px(`DESIGN.md`의 `brand-logo`)로 들어간다.

@@ -1,5 +1,6 @@
 // vo_sync.json의 배치표대로 내레이션 클립을 영상 타임라인에 놓고, 배경음을 덕킹해 섞는다.
 //   node mix-vo.mjs   →  out/vo-track.wav, out/bgm-ducked.wav, out/vo-clips/*.wav, out/mix.wav, out/exc-kinetic-vo.mp4
+//   node mix-vo.mjs --accent split  →  같은 믹스를 out/exc-kinetic-split.mp4(C안)에 합쳐 out/exc-kinetic-split-vo.mp4
 // 필요: out/exc-kinetic.mp4와 bgm.wav(npm run render), vo/ 안의 블록 테이크(vo_sync.json의 sources)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(ROOT, 'out');
+const ai = process.argv.indexOf('--accent'), SUF = ai < 0 ? '' : `-${process.argv[ai + 1]}`;
 const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'vo_sync.json'), 'utf8'));
 const M = cfg.mix, SR = M.sample_rate, DUR = 88, N = Math.round(SR * DUR);
 const db2g = db => Math.pow(10, db / 20);
@@ -111,7 +113,7 @@ const p1 = ff(['-i', raw, '-af', `loudnorm=I=${M.target_lufs}:TP=${M.true_peak}:
 const js = JSON.parse(p1.slice(p1.lastIndexOf('{'), p1.lastIndexOf('}') + 1));
 const mix = path.join(OUT, 'mix.wav');
 ff(['-y', '-i', raw, '-af', `loudnorm=I=${M.target_lufs}:TP=${M.true_peak}:LRA=11:measured_I=${js.input_i}:measured_TP=${js.input_tp}:measured_LRA=${js.input_lra}:measured_thresh=${js.input_thresh}:offset=${js.target_offset}:linear=true:print_format=summary`, '-ar', String(SR), '-c:a', 'pcm_s24le', mix]);
-const video = path.join(OUT, 'exc-kinetic.mp4'), final = path.join(OUT, 'exc-kinetic-vo.mp4');
+const video = path.join(OUT, `exc-kinetic${SUF}.mp4`), final = path.join(OUT, `exc-kinetic${SUF}-vo.mp4`);
 ff(['-y', '-i', video, '-i', mix, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', final]);
 fs.unlinkSync(raw);
 console.log(`완료: ${final}`);

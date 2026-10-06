@@ -45,7 +45,7 @@ const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
 
 // ---------- 토큰: DESIGN.md의 colors 블록을 읽어 덮어쓴다 ----------
-const C = { paper: '#F2EEE5', ink: '#15171C', signal: '#009A5A', cobalt: '#2347C6', ochre: '#EDB01F', graphite: '#6B6E75', rule: '#CFC8BA' };
+const C = { paper: '#F2EEE5', ink: '#15171C', signal: '#009A5A', alert: '#E0412B', cobalt: '#2347C6', ochre: '#EDB01F', graphite: '#6B6E75', rule: '#CFC8BA' };
 async function loadTokens() {
   try {
     const r = await fetch('DESIGN.md', { cache: 'no-store' });
@@ -60,6 +60,11 @@ async function loadTokens() {
     }
   } catch (e) { /* 기본 팔레트 사용 */ }
 }
+// 강조색 모드: 기본은 영상 전체가 signal(로고 초록)이다. ?accent=split(C안)이면 문제 구간(S0·S1과
+// 21초에 흩어지는 그 잔해)은 alert로 칠하고, 21초의 선부터 signal로 넘어가 문제와 해법을 색으로 나눈다.
+const SPLIT = new URLSearchParams(location.search).get('accent') === 'split';
+const probAcc = () => (SPLIT ? C.alert : C.signal);
+const probCol = col => (col === 'signal' ? probAcc() : C[col]);
 
 // ---------- 로고: 사용자가 준 파일을 엔딩 카드에 작게 쓴다(brand/는 레포에 넣지 않는다) ----------
 const LOGO_W = 330; // DESIGN.md components.brand-logo.width
@@ -348,7 +353,7 @@ function S0(t) {
   line(rx0, ry, lerp(rx0, rx1, rp), ry, C.ink, 2, 0.9);
   for (let x = rx0, k = 0; x <= lerp(rx0, rx1, rp); x += 32, k++) line(x, ry, x, ry - (k % 5 ? 10 : 24), C.ink, 1.5, 0.7);
   if (drop > 0) {
-    ctx.save(); ctx.fillStyle = C.signal; ctx.globalAlpha = drop;
+    ctx.save(); ctx.fillStyle = probAcc(); ctx.globalAlpha = drop;
     ctx.beginPath(); ctx.moveTo(bx, ry - 30); ctx.lineTo(bx - 10, ry - 48); ctx.lineTo(bx + 10, ry - 48); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
@@ -362,7 +367,7 @@ function S0(t) {
     extra: (i, n, ch, r) => {
       if (ch.c !== '?') return {};
       const rr = th * 1.1, h = 62;
-      return { r: rr, dx: 16 - h * Math.sin(rr), dy: (r.dy || 0) - h * (1 - Math.cos(rr)), color: C.signal, w: 700 };
+      return { r: rr, dx: 16 - h * Math.sin(rr), dy: (r.dy || 0) - h * (1 - Math.cos(rr)), color: probAcc(), w: 700 };
     },
   }));
 
@@ -374,7 +379,7 @@ function S0(t) {
     // 전환: 추가 잉크 원으로 화면을 덮는다
     const w = prog(t, 6.75, 7.5);
     if (w > 0) disc(bx, by, lerp(46, 2400, E.inExpo(w)), C.ink);
-    disc(bx, by, bob, mix(C.signal, C.ink, prog(t, 6.75, 7.05)));
+    disc(bx, by, bob, mix(probAcc(), C.ink, prog(t, 6.75, 7.05)));
   }
 }
 
@@ -390,7 +395,7 @@ function shPos(s, t) {
 }
 function kwStyle(k) {
   if (k.style === 0) return { fillA: 0, stroke: C.paper, strokeA: 0.7, text: C.paper, fill: C.ink };
-  if (k.style === 1) return { fillA: 1, fill: C[k.col], strokeA: 0, stroke: C.paper, text: k.col === 'ochre' ? C.ink : C.paper };
+  if (k.style === 1) return { fillA: 1, fill: probCol(k.col), strokeA: 0, stroke: C.paper, text: k.col === 'ochre' ? C.ink : C.paper };
   return { fillA: 0, fill: C.ink, strokeA: 0, stroke: C.paper, text: C.paper };
 }
 function drawChaos(t, exit = 0, skip) {
@@ -399,7 +404,7 @@ function drawChaos(t, exit = 0, skip) {
     if (a <= 0) continue;
     let { x, y, r } = shPos(s, t);
     if (exit > 0) { const dx = x - W / 2, dy = y - H / 2, d = Math.hypot(dx, dy) || 1; x += dx / d * 900 * E.inCubic(exit); y += dy / d * 900 * E.inCubic(exit); }
-    drawShape(s.type, x, y, r, s.size, C[s.col], a * (1 - exit) * 0.9, lerp(0.85, 1, a));
+    drawShape(s.type, x, y, r, s.size, probCol(s.col), a * (1 - exit) * 0.9, lerp(0.85, 1, a));
   }
   for (const k of KWS) {
     if (skip && skip.has(k.i)) continue;
@@ -421,7 +426,7 @@ function S1(t) {
   const halo = [C.ink, 30];
   if (t < 11.2) kText('교육 과정은 늘어나는데', W / 2, 575, { size: 112, weight: 800, color: C.paper, align: 'center', halo },
     anim(t, 8.5, 10.7, { type: 'slide', size: 112, weight: 800, gap: 0.035, dur: 0.6, outType: 'fall' }));
-  if (t > 11.3 && t < 14.4) kText('성과는 왜 [그대로]일까', W / 2, 575, { size: 112, weight: 800, color: C.paper, align: 'center', halo },
+  if (t > 11.3 && t < 14.4) kText('성과는 왜 [그대로]일까', W / 2, 575, { size: 112, weight: 800, color: C.paper, acc: probAcc(), align: 'center', halo },
     anim(t, 11.5, 13.8, { type: 'drop', size: 112, weight: 800, gap: 0.045, dur: 0.6, outType: 'fall' }));
   if (t > 14.3 && t < 18.6) {
     const sep = 230 * E.inOutCubic(prog(t, 16.0, 17.5));
@@ -432,10 +437,10 @@ function S1(t) {
     if (lp > 0 && t < 17.95) {
       const ly = y - 40, a = lx + 16, b = rx - 16, mid = (a + b) / 2;
       const al = 1 - prog(t, 17.6, 17.95);
-      if (snap <= 0) line(a, ly, lerp(a, b, lp), ly, C.signal, 5);
+      if (snap <= 0) line(a, ly, lerp(a, b, lp), ly, probAcc(), 5);
       else {
-        line(a, ly, lerp(mid - 6, a, snap), ly + 30 * snap, C.signal, 5, al);
-        line(lerp(mid + 6, b, snap), ly - 30 * snap, b, ly, C.signal, 5, al);
+        line(a, ly, lerp(mid - 6, a, snap), ly + 30 * snap, probAcc(), 5, al);
+        line(lerp(mid + 6, b, snap), ly - 30 * snap, b, ly, probAcc(), 5, al);
       }
     }
     kText('교육 따로,', lx, y, { size: 124, weight: 900, color: C.paper, align: 'right', halo },
@@ -904,7 +909,7 @@ function render(t) {
   await Promise.all([document.fonts.load('900 100px Pretendard', '엑스퍼트'), document.fonts.load('400 100px Pretendard', '교육')]);
   makeGrain();
   window.renderFrame = render;
-  window.__meta = { W, H, FPS, DUR, font: document.fonts.check('900 100px Pretendard', '엑'), logo: LOGO ? LOGO.file : null };
+  window.__meta = { W, H, FPS, DUR, font: document.fonts.check('900 100px Pretendard', '엑'), logo: LOGO ? LOGO.file : null, accent: SPLIT ? 'split' : 'signal' };
   window.__ready = true;
   if (RENDER) { render(Number(new URLSearchParams(location.search).get('t') || 0)); return; }
 
