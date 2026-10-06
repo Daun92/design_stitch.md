@@ -1,0 +1,20 @@
+{
+  "name": "exc-kinetic-video",
+  "private": true,
+  "type": "module",
+  "description": "90초 이내 키네틱 모션그래픽: 직원 교육 컨설팅은 엑스퍼트컨설팅",
+  "scripts": {
+    "bgm": "node bgm.mjs",
+    "render": "node bgm.mjs && node render.mjs",
+    "render:split": "node bgm.mjs && node render.mjs --accent split",
+    "render:split-vertical": "node bgm.mjs && node render.mjs --accent split --format vertical",
+    "preview": "npx http-server . -p 8080 -c-1",
+    "mix": "node mix-vo.mjs",
+    "mix:split": "node mix-vo.mjs --accent split",
+    "mix:split-vertical": "node mix-vo.mjs --accent split --format vertical"
+  },
+  "devDependencies": {
+    "playwright-core": "1.56.1",
+    "pretendard": "1.3.9"
+  }
+}
