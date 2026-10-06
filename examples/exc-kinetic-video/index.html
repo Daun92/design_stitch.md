@@ -25,6 +25,9 @@ canvas { display: block; width: min(100%, calc((100vh - 96px) * 16 / 9)); height
 body.render { padding: 0; display: block; }
 body.render .ui { display: none; }
 body.render canvas { width: 1920px; height: 1080px; }
+html.vert canvas { aspect-ratio: 9 / 16; width: min(100%, calc((100vh - 96px) * 9 / 16)); }
+html.vert .ui { width: min(100%, calc((100vh - 96px) * 9 / 16)); }
+html.vert body.render canvas { width: 1080px; height: 1920px; }
 </style>
 </head>
 <body>
@@ -38,10 +41,14 @@ body.render canvas { width: 1920px; height: 1080px; }
 <script>
 'use strict';
 // 엑스퍼트컨설팅 키네틱 모션그래픽 — render(t)는 t(초)만으로 프레임을 결정한다(결정론적).
-const W = 1920, H = 1080, FPS = 30, DUR = 88;
+// 화면 규격: 기본은 16:9(1920×1080). ?format=vertical이면 9:16 숏폼(1080×1920)으로 장면을 다시 배치한다.
+// 세로판의 글자와 로고는 플랫폼 UI가 덮지 않는 영역(x 90–990, y 270–1250) 안에 둔다.
+const VERT = new URLSearchParams(location.search).get('format') === 'vertical';
+const W = VERT ? 1080 : 1920, H = VERT ? 1920 : 1080, FPS = 30, DUR = 88;
 const RENDER = new URLSearchParams(location.search).has('render');
 if (RENDER) document.body.classList.add('render');
 const cv = document.getElementById('c');
+if (VERT) { cv.width = W; cv.height = H; document.documentElement.classList.add('vert'); }
 const ctx = cv.getContext('2d');
 
 // ---------- 토큰: DESIGN.md의 colors 블록을 읽어 덮어쓴다 ----------
@@ -216,6 +223,11 @@ function kText(str, x, y, o = {}, fn) {
   return { x0, width: L.width, chars: L.chars };
 }
 
+// 강조어([ ])를 따로 등장시킬 때, 강조 글자의 순번을 강조 구간의 처음부터 센다. 그래서 강조어가 t0에 바로 시작한다.
+function accSplit(str, hi, lo) {
+  const cs = parse(str), first = cs.findIndex(c => c.acc), nAcc = cs.filter(c => c.acc).length;
+  return (i, n, ch) => (ch.acc ? hi(i - first, nAcc, ch) : lo(i, n, ch));
+}
 function cin(t, t0, i, n, gap, dur, from) {
   const order = from === 'center' ? Math.abs(i - (n - 1) / 2) : from === 'end' ? n - 1 - i : i;
   const s = t0 + order * gap;
@@ -334,7 +346,8 @@ function drawShape(type, x, y, rot, size, col, alpha, scale = 1) {
 // ================= S0 진자: 질문 (0 – 7.5s) =================
 function S0(t) {
   bg(C.paper);
-  const px = 1400, py = -10, L = 620;
+  // 세로판: 진자는 위쪽 가운데에 매달고, 눈금자와 글자는 그 아래에 둔다.
+  const px = VERT ? 540 : 1400, py = -10, L = VERT ? 560 : 620;
   const drop = E.outCubic(prog(t, 0.2, 1.0));
   const A = 0.42 * E.inOutCubic(prog(t, 0.9, 2.0));
   const th = A * Math.cos(Math.PI * (t - 1.0)); // 정수 초마다 끝점(틱)
@@ -349,7 +362,7 @@ function S0(t) {
     line(px + Math.cos(a) * (L - 16), py + Math.sin(a) * (L - 16), px + Math.cos(a) * (L + 16), py + Math.sin(a) * (L + 16), C.graphite, 2, g);
   }
   const rp = E.outCubic(prog(t, 0.5, 1.6));
-  const rx0 = 190, rx1 = 1730, ry = 930;
+  const rx0 = VERT ? 90 : 190, rx1 = VERT ? 990 : 1730, ry = VERT ? 690 : 930;
   line(rx0, ry, lerp(rx0, rx1, rp), ry, C.ink, 2, 0.9);
   for (let x = rx0, k = 0; x <= lerp(rx0, rx1, rp); x += 32, k++) line(x, ry, x, ry - (k % 5 ? 10 : 24), C.ink, 1.5, 0.7);
   if (drop > 0) {
@@ -360,9 +373,10 @@ function S0(t) {
 
   // 텍스트
   const out = 6.55;
-  kText('직원 교육,', 190, 470, { size: 156, weight: 820 }, anim(t, 1.5, out, { type: 'rise', size: 156, weight: 820, gap: 0.07, dur: 0.7, outType: 'up' }));
-  kText('어디서부터', 196, 622, { size: 84, weight: 420, color: C.graphite }, anim(t, 3.5, out, { type: 'rise', size: 84, weight: 420, gap: 0.05, dur: 0.55, outType: 'up' }));
-  kText('시작해야 할까?', 196, 732, { size: 84, weight: 420, color: C.graphite }, anim(t, 4.5, out, {
+  const tx = VERT ? 90 : 190, ty = VERT ? [900, 1040, 1150] : [470, 622, 732];
+  kText('직원 교육,', tx, ty[0], { size: 156, weight: 820 }, anim(t, 1.5, out, { type: 'rise', size: 156, weight: 820, gap: 0.07, dur: 0.7, outType: 'up' }));
+  kText('어디서부터', tx + 6, ty[1], { size: 84, weight: 420, color: C.graphite }, anim(t, 3.5, out, { type: 'rise', size: 84, weight: 420, gap: 0.05, dur: 0.55, outType: 'up' }));
+  kText('시작해야 할까?', tx + 6, ty[2], { size: 84, weight: 420, color: C.graphite }, anim(t, 4.5, out, {
     type: 'rise', size: 84, weight: 420, gap: 0.05, dur: 0.55, outType: 'up',
     extra: (i, n, ch, r) => {
       if (ch.c !== '?') return {};
@@ -424,6 +438,7 @@ function S1(t) {
   ctx.restore();
 
   const halo = [C.ink, 30];
+  if (VERT) { S1TextV(t, halo); return; }
   if (t < 11.2) kText('교육 과정은 늘어나는데', W / 2, 575, { size: 112, weight: 800, color: C.paper, align: 'center', halo },
     anim(t, 8.5, 10.7, { type: 'slide', size: 112, weight: 800, gap: 0.035, dur: 0.6, outType: 'fall' }));
   if (t > 11.3 && t < 14.4) kText('성과는 왜 [그대로]일까', W / 2, 575, { size: 112, weight: 800, color: C.paper, acc: probAcc(), align: 'center', halo },
@@ -450,21 +465,56 @@ function S1(t) {
   }
 }
 
+// 세로판 S1 문구: 한 줄을 두 줄로 나누고, '교육 따로, / 현장 따로.'는 위아래로 벌어지며 세로 선이 끊어진다.
+function S1TextV(t, halo) {
+  const cx = W / 2, y1 = 700, y2 = 846, sz = 120;
+  const st = (acc) => ({ size: sz, weight: 800, color: C.paper, align: 'center', halo, acc });
+  if (t < 11.2) {
+    kText('교육 과정은', cx, y1, st(), anim(t, 8.5, 10.7, { type: 'slide', size: sz, weight: 800, gap: 0.035, dur: 0.6, outType: 'fall' }));
+    kText('늘어나는데', cx, y2, st(), anim(t, 8.7, 10.8, { type: 'slide', size: sz, weight: 800, gap: 0.035, dur: 0.6, outType: 'fall' }));
+  }
+  if (t > 11.3 && t < 14.4) {
+    kText('성과는 왜', cx, y1, st(probAcc()), anim(t, 11.5, 13.8, { type: 'drop', size: sz, weight: 800, gap: 0.045, dur: 0.6, outType: 'fall' }));
+    kText('[그대로]일까', cx, y2, st(probAcc()), anim(t, 11.72, 13.9, { type: 'drop', size: sz, weight: 800, gap: 0.045, dur: 0.6, outType: 'fall' }));
+  }
+  if (t > 14.3 && t < 18.6) {
+    const sep = 130 * E.inOutCubic(prog(t, 16.0, 17.5));
+    const ya = 660 - sep, yb = 880 + sep;
+    // 둘을 잇는 세로 선: 늘어나다 끊어진다
+    const lp = E.outExpo(prog(t, 15.6, 15.95));
+    const snap = E.outExpo(prog(t, 17.5, 17.85));
+    if (lp > 0 && t < 17.95) {
+      const a = ya + 34, b = yb - 112, mid = (a + b) / 2;
+      const al = 1 - prog(t, 17.6, 17.95);
+      if (snap <= 0) line(cx, a, cx, lerp(a, b, lp), probAcc(), 5);
+      else {
+        line(cx, a, cx + 30 * snap, lerp(mid - 6, a, snap), probAcc(), 5, al);
+        line(cx - 30 * snap, lerp(mid + 6, b, snap), cx, b, probAcc(), 5, al);
+      }
+    }
+    kText('교육 따로,', cx, ya, { size: 124, weight: 900, color: C.paper, align: 'center', halo },
+      anim(t, 14.5, 17.9, { type: 'slam', size: 124, weight: 900, gap: 0.03, dur: 0.5, outType: 'fall' }));
+    kText('현장 따로.', cx, yb, { size: 124, weight: 900, color: C.paper, align: 'center', halo },
+      anim(t, 15.4, 17.9, { type: 'slam', size: 124, weight: 900, gap: 0.03, dur: 0.5, outType: 'fall' }));
+  }
+}
+
 // ================= S2 정렬: 전환점 (21 – 29s) =================
-const LINE_KW = [0, 1, 2, 3, 4, 5, 6, 7];
-const LINE_Y = 540;
+// 세로판은 폭이 좁아 키워드 6개만 선에 꿴다.
+const LINE_KW = VERT ? [0, 1, 2, 3, 5, 6] : [0, 1, 2, 3, 4, 5, 6, 7];
+const LINE_Y = VERT ? 560 : 540;
 let lineSlots = null;
 function getSlots() {
   if (lineSlots) return lineSlots;
   const ws = LINE_KW.map(i => pillWidth(KW[i], 30, 600));
   const total = ws.reduce((a, b) => a + b, 0);
-  const gap = (1720 - total) / (LINE_KW.length - 1);
-  let x = 100;
+  const gap = ((VERT ? 960 : 1720) - total) / (LINE_KW.length - 1);
+  let x = VERT ? 60 : 100;
   lineSlots = ws.map(w => { const c = x + w / 2; x += w + gap; return { x: c, w }; });
   lineSlots.gap = gap;
   return lineSlots;
 }
-const RC = { x: 560, y: 560, R: 300 };
+const RC = VERT ? { x: 540, y: 590, R: 250 } : { x: 560, y: 560, R: 300 };
 function morphLine(e, col, lw) {
   const N = 240;
   ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -485,8 +535,9 @@ function S2(t) {
   const sp = E.inOutCubic(prog(t, 21.35, 22.3));
   if (sp < 1) {
     ctx.fillStyle = C.ink;
-    ctx.fillRect(0, -sp * 600, W, LINE_Y);
-    ctx.fillRect(0, LINE_Y + sp * 600, W, H - LINE_Y);
+    const sd = VERT ? 1400 : 600; // 세로판은 아래쪽 잉크가 길어 더 멀리 밀어낸다
+    ctx.fillRect(0, -sp * sd, W, LINE_Y);
+    ctx.fillRect(0, LINE_Y + sp * sd, W, H - LINE_Y);
   }
   const skip = new Set(LINE_KW);
   if (t < 22.2) drawChaos(20, prog(t, 21.05, 21.9), skip);
@@ -520,6 +571,16 @@ function S2(t) {
     const r = 8 * E.outBack(prog(t, 22.6 + j * 0.06, 23.0 + j * 0.06));
     disc(x, LINE_Y, Math.max(0, r), C.signal, 1 - outP);
   }
+  if (VERT) {
+    // 세로판: 문장을 두 줄로 나누고 '설계'를 따로 키운다. 쾅은 내레이션 '설'(25.4s)에 맞춘다.
+    kText('필요한 건 더 많은 과정이 아니라', W / 2, 400, { size: 54, weight: 500, align: 'center', color: C.graphite },
+      anim(t, 23.0, 27.7, { type: 'rise', size: 54, weight: 500, gap: 0.03, dur: 0.55, outType: 'up' }));
+    kText('하나로 연결된', W / 2, 850, { size: 136, weight: 900, align: 'center' },
+      anim(t, 24.5, 27.8, { type: 'rise', size: 136, weight: 900, gap: 0.05, dur: 0.6, outType: 'fall' }));
+    kText('[설계]', W / 2, 1110, { size: 230, weight: 900, align: 'center' },
+      anim(t, 25.4, 27.8, { type: 'slam', size: 230, weight: 900, gap: 0.08, dur: 0.6, outType: 'fall' }));
+    return;
+  }
   kText('필요한 건 더 많은 과정이 아니라', W / 2, 372, { size: 64, weight: 500, align: 'center', color: C.graphite },
     anim(t, 23.0, 27.7, { type: 'rise', size: 64, weight: 500, gap: 0.03, dur: 0.55, outType: 'up' }));
   const hi = anim(t, 25.4, 27.8, { type: 'slam', size: 156, weight: 900, gap: 0.08, dur: 0.6, outType: 'fall' });
@@ -546,13 +607,13 @@ function ballAngle(t) {
   if (k === 5) return TH0 + (5 + E.inOutCubic(prog(local, 1.0, 3.0))) * Math.PI / 3;
   return TH0 + TAU + TAU * 2 * E.inCubic(prog(t, 49.3, 51.5));
 }
-const HOOK = { x: 1390, y: 150 };
+const HOOK = VERT ? { x: 540, y: 790 } : { x: 1390, y: 150 };
 function ballPos(t) {
   if (t < 30) return null;
   if (t < 31) return { x: RC.x, y: lerp(-80, RC.y - RC.R, E.outBounce(prog(t, 30.0, 31.0))), r: 17 };
   if (t < 51.5) { const a = ballAngle(t); return { x: RC.x + RC.R * Math.cos(a), y: RC.y + RC.R * Math.sin(a), r: 17 }; }
   const p = E.outCubic(prog(t, 51.5, 52.3));
-  const P0 = { x: RC.x, y: RC.y - RC.R }, P1 = { x: 1050, y: RC.y - RC.R - 40 }, P2 = HOOK;
+  const P0 = { x: RC.x, y: RC.y - RC.R }, P1 = VERT ? { x: 900, y: 520 } : { x: 1050, y: RC.y - RC.R - 40 }, P2 = HOOK;
   const u = 1 - p;
   return { x: u * u * P0.x + 2 * u * p * P1.x + p * p * P2.x, y: u * u * P0.y + 2 * u * p * P1.y + p * p * P2.y, r: lerp(17, 11, p) };
 }
@@ -566,17 +627,18 @@ function S3(t) {
 
   // 동심 키네틱 링
   const r1 = E.outCubic(prog(t, 29.2, 30.4)), r2 = E.outCubic(prog(t, 29.4, 30.6)), r3 = E.outCubic(prog(t, 29.6, 30.8));
-  const rot = t * 0.15;
-  ring(RC.x, RC.y, 236, C.graphite, 2, 0.8, rot, rot + TAU * r1, [2, 12]);
-  ring(RC.x, RC.y, 180, C.ink, 1.5, 0.9, -t * 0.2, -t * 0.2 + TAU * r2);
+  const rot = t * 0.15, rk = RC.R / 300; // 세로판은 고리가 작아 안쪽 링도 같은 비율로 줄인다
+  ring(RC.x, RC.y, 236 * rk, C.graphite, 2, 0.8, rot, rot + TAU * r1, [2, 12]);
+  ring(RC.x, RC.y, 180 * rk, C.ink, 1.5, 0.9, -t * 0.2, -t * 0.2 + TAU * r2);
   [[0.5, 'cobalt', 9, 0], [-0.35, 'ochre', 8, 2], [0.8, 'ink', 6, 4]].forEach(([w, c, r, ph]) => {
     const a = ph + t * w;
-    disc(RC.x + 180 * Math.cos(a), RC.y + 180 * Math.sin(a), r * r2, C[c]);
+    disc(RC.x + 180 * rk * Math.cos(a), RC.y + 180 * rk * Math.sin(a), r * r2, C[c]);
   });
-  ring(RC.x, RC.y, 122, C.ochre, 11, r3, -t * 0.6, -t * 0.6 + Math.PI / 2 * r3);
-  ring(RC.x, RC.y, 122, C.cobalt, 11, r3, t * 0.9 + 2, t * 0.9 + 2 + 0.7 * r3);
-  kText('Total HR', RC.x, RC.y + 6, { size: 40, weight: 820, align: 'center' }, anim(t, 29.8, null, { type: 'rise', size: 40, weight: 820, gap: 0.04 }));
-  kText('PROFESSIONAL', RC.x, RC.y + 42, { size: 15, weight: 650, align: 'center', track: 0.32, color: C.graphite }, anim(t, 30.2, null, { type: 'rise', size: 15, weight: 650, gap: 0.02 }));
+  ring(RC.x, RC.y, 122 * rk, C.ochre, 11, r3, -t * 0.6, -t * 0.6 + Math.PI / 2 * r3);
+  ring(RC.x, RC.y, 122 * rk, C.cobalt, 11, r3, t * 0.9 + 2, t * 0.9 + 2 + 0.7 * r3);
+  const ts = VERT ? 34 : 40;
+  kText('Total HR', RC.x, RC.y + 6, { size: ts, weight: 820, align: 'center' }, anim(t, 29.8, null, { type: 'rise', size: ts, weight: 820, gap: 0.04 }));
+  kText('PROFESSIONAL', RC.x, RC.y + 42 * rk, { size: 15, weight: 650, align: 'center', track: 0.32, color: C.graphite }, anim(t, 30.2, null, { type: 'rise', size: 15, weight: 650, gap: 0.02 }));
 
   // 기본 링 + 진행 호
   const morphDone = prog(t, 29.0, 29.6);
@@ -614,6 +676,7 @@ function S3(t) {
   const b = ballPos(t);
   if (b && t >= 51.5) disc(b.x, b.y, b.r, C.signal);
 
+  if (VERT) { S3PanelV(t); return; }
   // 오른쪽 패널
   const hp = E.outExpo(prog(t, 30.4, 31.0)), ho = 1 - prog(t, 48.5, 48.9);
   if (hp > 0 && ho > 0) {
@@ -651,16 +714,55 @@ function S3(t) {
   }
 }
 
+// 세로판 S3 패널: 고리 아래에 라벨·순번 / 단계명 / 설명 / 태그를 쌓는다.
+function S3PanelV(t) {
+  const X = 90, YA = 975;
+  const hp = E.outExpo(prog(t, 30.4, 31.0)), ho = 1 - prog(t, 48.5, 48.9);
+  if (hp > 0 && ho > 0) {
+    ctx.save(); ctx.globalAlpha = ho;
+    ctx.fillStyle = C.signal; ctx.fillRect(X, YA - 12, 46 * hp, 5);
+    kText('TOTAL HR FLOW', X + 62, YA, { size: 20, weight: 700, track: 0.34, color: C.graphite, alpha: hp });
+    let v = 0;
+    for (let k = 0; k <= 5; k++) v += E.inOutCubic(prog(t, actT(k) - 0.35, actT(k) + 0.1));
+    rollDigit(0, 476, YA + 4, 34, 700, C.ink, YA - 30, YA + 8, hp);
+    rollDigit(v, 498, YA + 4, 34, 700, C.ink, YA - 30, YA + 8, hp);
+    kText('/ 06', 522, YA + 2, { size: 20, weight: 500, color: C.graphite, alpha: hp });
+    ctx.restore();
+  }
+  ST.forEach((s, k) => {
+    const a = actT(k);
+    if (t < a - 0.05 || t > a + 3.05) return;
+    const o = a + 2.62;
+    clipRect(X - 10, 1080 - 106, 920, 136, () =>
+      kText(s.name, X, 1080, { size: 100, weight: 860 }, anim(t, a + 0.05, o, { type: 'mask', size: 100, weight: 860, gap: 0.035, dur: 0.6, outType: 'mask', outDur: 0.32 })));
+    clipRect(X - 10, 1150 - 50, 920, 64, () =>
+      kText(s.verb, X + 2, 1150, { size: 44, weight: 420, color: C.graphite }, anim(t, a + 0.18, o + 0.04, { type: 'mask', size: 44, weight: 420, gap: 0.018, dur: 0.6, outType: 'mask', outDur: 0.3 })));
+    let x = X;
+    s.tags.forEach((tag, j) => {
+      const w = pillWidth(tag, 26, 620);
+      const p = E.outBack(prog(t, a + 0.4 + j * 0.09, a + 0.8 + j * 0.09));
+      const q = prog(t, o, o + 0.25);
+      pill(tag, x + w / 2, 1222, 26, 620, { fillA: 0, strokeA: 1, stroke: C.ink, lw: 1.6, text: C.ink, alpha: clamp(p) * (1 - q), scale: lerp(0.85, 1, p) });
+      x += w + 14;
+    });
+  });
+  if (t > 48.9) {
+    kText('채용에서 성장까지,', X, 1060, { size: 60, weight: 420, color: C.graphite }, anim(t, 49.0, 51.1, { type: 'rise', size: 60, weight: 420, gap: 0.035, outType: 'up' }));
+    kText('하나의 [흐름]으로.', X, 1190, { size: 100, weight: 900 }, anim(t, 49.5, 51.15, { type: 'rise', size: 100, weight: 900, gap: 0.05, outType: 'up' }));
+  }
+}
+
 // ================= S4 모빌: 계층과 균형 (52.3 – 63s) =================
 function S4(t) {
   bg(C.paper);
-  const lift = -1050 * E.inCubic(prog(t, 61.9, 62.9));
+  const lift = -(VERT ? 1450 : 1050) * E.inCubic(prog(t, 61.9, 62.9));
+  const mk = VERT ? 0.8 : 1, mv = VERT ? 0.7 : 1; // 세로판 모빌: 팔 길이·원판은 0.8배, 줄 길이는 0.7배
   ctx.save(); ctx.translate(0, lift);
   const aA = 0.16 * damped(t, 52.8, 3.2, 0.9) + 0.10 * damped(t, 54.0, 3.2, 0.9) + 0.06 * damped(t, 55.2, 3.2, 0.9) + 0.012 * Math.sin(1.3 * t);
   const aB = -0.18 * damped(t, 54.0, 3.8, 1.0) - 0.08 * damped(t, 55.2, 3.8, 1.0) + 0.015 * Math.sin(1.7 * t + 1);
   const aC = 0.22 * damped(t, 55.2, 4.4, 1.1) + 0.018 * Math.sin(2.1 * t + 2);
   const sg = E.outCubic(prog(t, 52.3, 52.7));
-  const PA = { x: HOOK.x, y: HOOK.y + 150 };
+  const PA = { x: HOOK.x, y: HOOK.y + 150 * mv };
   line(HOOK.x, HOOK.y, HOOK.x, lerp(HOOK.y, PA.y, sg), C.ink, 1.6);
   const beam = (P, a, l, r, app, col = C.ink) => {
     const c = Math.cos(a), s = Math.sin(a);
@@ -677,23 +779,33 @@ function S4(t) {
     if (label && rr > 4) kText(label, P.x, yy + rr + ls * 0.36, { size: ls, weight: 820, align: 'center', color: tc, alpha: prog(app, 0.6, 1) });
   };
   const apA = E.outBack(prog(t, 52.6, 53.1)), apB = E.outBack(prog(t, 53.8, 54.3)), apC = E.outBack(prog(t, 55.0, 55.5));
-  const A = beam(PA, aA, 380, 210, apA);
-  hang(A.L, 120, prog(t, 52.9, 53.5), 64, C.ink, '임원', 34, C.paper);
+  const A = beam(PA, aA, 380 * mk, 210 * mk, apA);
+  hang(A.L, 120 * mv, prog(t, 52.9, 53.5), 64 * mk, C.ink, '임원', 34 * mk, C.paper);
   const sB = prog(t, 53.4, 53.8);
-  const PB = { x: A.R.x, y: A.R.y + 190 * sB };
+  const PB = { x: A.R.x, y: A.R.y + 190 * mv * sB };
   if (apA > 0.5 && sB > 0) line(A.R.x, A.R.y, PB.x, PB.y, C.ink, 1.6);
-  const B = beam(PB, aB, 270, 160, apB);
-  hang(B.R, 110, prog(t, 54.1, 54.7), 78, C.signal, '팀장', 38, C.paper);
+  const B = beam(PB, aB, 270 * mk, 160 * mk, apB);
+  hang(B.R, 110 * mv, prog(t, 54.1, 54.7), 78 * mk, C.signal, '팀장', 38 * mk, C.paper);
   const sC = prog(t, 54.6, 55.0);
-  const PC = { x: B.L.x, y: B.L.y + 170 * sC };
+  const PC = { x: B.L.x, y: B.L.y + 170 * mv * sC };
   if (apB > 0.5 && sC > 0) line(B.L.x, B.L.y, PC.x, PC.y, C.ink, 1.6);
-  const Cb = beam(PC, aC, 210, 170, apC);
-  hang(Cb.L, 110, prog(t, 55.3, 55.9), 58, C.ochre, '신입', 30, C.ink);
-  hang(Cb.R, 90, prog(t, 55.5, 56.1), 30, C.cobalt);
+  const Cb = beam(PC, aC, 210 * mk, 170 * mk, apC);
+  hang(Cb.L, 110 * mv, prog(t, 55.3, 55.9), 58 * mk, C.ochre, '신입', 30 * mk, C.ink);
+  hang(Cb.R, 90 * mv, prog(t, 55.5, 56.1), 30 * mk, C.cobalt);
   disc(HOOK.x, HOOK.y, 11, C.signal);
   ctx.restore();
 
   const out = 61.4;
+  if (VERT) {
+    // 세로판: 글은 위, 모빌은 아래. '균형' 쾅은 내레이션 '균'(58.8s)에 맞춘다.
+    kText('임원부터 팀장, 신입까지', 90, 330, { size: 46, weight: 420, color: C.graphite }, anim(t, 53.0, out, { type: 'rise', size: 46, weight: 420, gap: 0.035, outType: 'up' }));
+    kText('직급마다 다른', 90, 462, { size: 92, weight: 850 }, anim(t, 55.8, out + 0.08, { type: 'rise', size: 92, weight: 850, gap: 0.05, outType: 'up' }));
+    kText('성장의 무게를', 90, 578, { size: 92, weight: 850 }, anim(t, 56.6, out + 0.16, { type: 'rise', size: 92, weight: 850, gap: 0.05, outType: 'up' }));
+    const vhi = anim(t, 58.8, out + 0.24, { type: 'slam', size: 92, weight: 900, gap: 0.08, dur: 0.55, outType: 'up' });
+    const vlo = anim(t, 58.3, out + 0.24, { type: 'rise', size: 92, weight: 900, gap: 0.05, outType: 'up' });
+    kText('하나의 [균형]으로.', 90, 720, { size: 92, weight: 900 }, accSplit('하나의 [균형]으로.', vhi, vlo));
+    return;
+  }
   kText('임원부터 팀장, 신입까지', 140, 330, { size: 50, weight: 420, color: C.graphite }, anim(t, 53.0, out, { type: 'rise', size: 50, weight: 420, gap: 0.035, outType: 'up' }));
   kText('직급마다 다른', 140, 474, { size: 100, weight: 850 }, anim(t, 55.8, out + 0.08, { type: 'rise', size: 100, weight: 850, gap: 0.05, outType: 'up' }));
   kText('성장의 무게를', 140, 604, { size: 100, weight: 850 }, anim(t, 56.6, out + 0.16, { type: 'rise', size: 100, weight: 850, gap: 0.05, outType: 'up' }));
@@ -711,6 +823,12 @@ function bridgeText(t) {
     const nx = (rx * Math.cos(ang) - ry * Math.sin(ang)) * sc, ny = (rx * Math.sin(ang) + ry * Math.cos(ang)) * sc;
     return { dx: nx - rx, dy: ny - ry + (r.dy || 0) * (1 - q), s: 1 - 0.85 * q, r: q * 2.4, a: r.a * (1 - Math.pow(q, 4)) };
   };
+  if (VERT) {
+    kText('교육의 성과는', W / 2, 600, { size: 60, weight: 420, align: 'center', color: C.paper }, anim(t, 71.0, null, { type: 'rise', size: 60, weight: 420, gap: 0.04, extra: pull }));
+    kText('누구와 [설계]하느냐에', W / 2, 760, { size: 96, weight: 860, align: 'center', color: C.paper }, anim(t, 71.8, null, { type: 'rise', size: 96, weight: 860, gap: 0.04, extra: pull }));
+    kText('따라 달라집니다.', W / 2, 890, { size: 96, weight: 860, align: 'center', color: C.paper }, anim(t, 72.6, null, { type: 'rise', size: 96, weight: 860, gap: 0.05, extra: pull }));
+    return;
+  }
   kText('교육의 성과는', W / 2, 420, { size: 64, weight: 420, align: 'center', color: C.paper }, anim(t, 71.0, null, { type: 'rise', size: 64, weight: 420, gap: 0.04, extra: pull }));
   kText('누구와 [설계]하느냐에 따라', W / 2, 568, { size: 100, weight: 860, align: 'center', color: C.paper }, anim(t, 71.8, null, { type: 'rise', size: 100, weight: 860, gap: 0.04, extra: pull }));
   kText('달라집니다.', W / 2, 700, { size: 100, weight: 860, align: 'center', color: C.paper }, anim(t, 72.6, null, { type: 'rise', size: 100, weight: 860, gap: 0.05, extra: pull }));
@@ -719,7 +837,9 @@ function S5(t) {
   bg(C.paper);
   const wp = E.outExpo(prog(t, 63.0, 63.6));
   ctx.fillStyle = C.ink; ctx.fillRect(W * (1 - wp), 0, W * wp + 1, H);
-  const size = 320, y = 650, top = y - size * 0.86, bot = y + size * 0.1;
+  // 세로판은 폭이 좁아 숫자를 260px로 줄이고, 라벨(LY)·숫자·설명(LB)을 화면 가운데 위쪽에 모은다.
+  const size = VERT ? 260 : 320, y = VERT ? 860 : 650, top = y - size * 0.86, bot = y + size * 0.1;
+  const LY = VERT ? 560 : 310, LB = VERT ? 1010 : 800, DX = VERT ? 168 : 205;
 
   // 1994 → 2026
   if (t < 68.4) {
@@ -728,11 +848,11 @@ function S5(t) {
     [0, 1, 2, 3].forEach(c => {
       let v = to1[c] * E.outCubic(prog(t, 63.4 + c * 0.09, 64.5 + c * 0.09));
       v += (to2[c] - to1[c]) * E.inOutCubic(prog(t, 65.0 + (3 - c) * 0.12, 66.5 + (3 - c) * 0.12));
-      rollDigit(v, W / 2 + (c - 1.5) * 205, y, size, 820, C.paper, top, bot, prog(t, 63.3, 63.5), -ex * 420);
+      rollDigit(v, W / 2 + (c - 1.5) * DX, y, size, 820, C.paper, top, bot, prog(t, 63.3, 63.5), -ex * 420);
     });
-    kText('SINCE', W / 2, 310, { size: 26, weight: 700, align: 'center', track: 0.42, color: C.signal }, anim(t, 63.8, 67.6, { type: 'rise', size: 26, weight: 700, gap: 0.04, outType: 'up' }));
-    if (t < 66.9) kText('1994년 설립', W / 2, 800, { size: 52, weight: 500, align: 'center', color: C.paper, alpha: 0.82 }, anim(t, 64.4, 66.5, { type: 'rise', size: 52, weight: 500, gap: 0.04, outType: 'up' }));
-    kText('30년 넘게, HR 한 길', W / 2, 800, { size: 60, weight: 820, align: 'center', color: C.paper }, anim(t, 66.7, 67.75, { type: 'rise', size: 60, weight: 820, gap: 0.035, outType: 'up' }));
+    kText('SINCE', W / 2, LY, { size: 26, weight: 700, align: 'center', track: 0.42, color: C.signal }, anim(t, 63.8, 67.6, { type: 'rise', size: 26, weight: 700, gap: 0.04, outType: 'up' }));
+    if (t < 66.9) kText('1994년 설립', W / 2, LB, { size: 52, weight: 500, align: 'center', color: C.paper, alpha: 0.82 }, anim(t, 64.4, 66.5, { type: 'rise', size: 52, weight: 500, gap: 0.04, outType: 'up' }));
+    kText('30년 넘게, HR 한 길', W / 2, LB, { size: 60, weight: 820, align: 'center', color: C.paper }, anim(t, 66.7, 67.75, { type: 'rise', size: 60, weight: 820, gap: 0.035, outType: 'up' }));
   }
   // 1,000+
   if (t > 68.2 && t < 71.2) {
@@ -756,8 +876,8 @@ function S5(t) {
       ctx.save(); ctx.globalAlpha = ap; ctx.translate(x + plusW / 2, y - size * 0.3 + ex); ctx.scale(lerp(1.8, 1, E.outExpo(pp)), lerp(1.8, 1, E.outExpo(pp)));
       ctx.font = F(820, size); ctx.fillStyle = C.signal; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('+', 0, 0); ctx.restore();
     }
-    kText('EVERY YEAR', W / 2, 310, { size: 26, weight: 700, align: 'center', track: 0.42, color: C.signal }, anim(t, 68.6, 70.6, { type: 'rise', size: 26, weight: 700, gap: 0.03, outType: 'up' }));
-    kText('매년 함께하는 기업·공공기관', W / 2, 800, { size: 56, weight: 620, align: 'center', color: C.paper }, anim(t, 69.0, 70.55, { type: 'rise', size: 56, weight: 620, gap: 0.03, outType: 'up' }));
+    kText('EVERY YEAR', W / 2, LY, { size: 26, weight: 700, align: 'center', track: 0.42, color: C.signal }, anim(t, 68.6, 70.6, { type: 'rise', size: 26, weight: 700, gap: 0.03, outType: 'up' }));
+    kText('매년 함께하는 기업·공공기관', W / 2, LB, { size: 56, weight: 620, align: 'center', color: C.paper }, anim(t, 69.0, 70.55, { type: 'rise', size: 56, weight: 620, gap: 0.03, outType: 'up' }));
   }
   if (t > 70.9) bridgeText(t);
 }
@@ -775,10 +895,12 @@ const VX = Array.from({ length: 150 }, (_, i) => {
 let brand = null;
 function getBrand() {
   if (brand) return brand;
-  const L2 = lay('엑스퍼트컨설팅', 190, 900, 0);
-  const r = 20, gap = 18, group = L2.width + gap + r * 2;
+  // 세로판은 워드마크를 130px 한 줄로 줄여(폭 약 750px) 마침표를 오른쪽 UI 영역에서 떼고, 기준선을 800에 둔다.
+  const size = VERT ? 130 : 190, base = VERT ? 800 : 640;
+  const L2 = lay('엑스퍼트컨설팅', size, 900, 0);
+  const r = VERT ? 14 : 20, gap = VERT ? 12 : 18, group = L2.width + gap + r * 2;
   const x0 = W / 2 - group / 2;
-  brand = { r, x0, PX: x0 + L2.width + gap + r, PY: 640 - r, pivotY: -10 };
+  brand = { r, x0, size, base, PX: x0 + L2.width + gap + r, PY: base - r, pivotY: -10 };
   return brand;
 }
 function S6(t) {
@@ -819,7 +941,8 @@ function S6(t) {
   const Lp = B.PY - B.pivotY;
   if (t >= 79.6) {
     const tt = t - 79.6;
-    const th = 0.2 * Math.exp(-2.4 * tt) * Math.sin(TAU * tt / 1.15) * (1 - E.inOutCubic(prog(t, 80.9, 81.4)));
+    // 세로판은 마침표가 오른쪽 끝에 가까워 진폭을 줄인다(화면 안에서 흔들리게).
+    const th = (VERT ? 0.12 : 0.2) * Math.exp(-2.4 * tt) * Math.sin(TAU * tt / 1.15) * (1 - E.inOutCubic(prog(t, 80.9, 81.4)));
     dx = B.PX + Lp * Math.sin(th); dy = B.pivotY + Lp * Math.cos(th);
   }
   const sd = E.outCubic(prog(t, 79.3, 79.6));
@@ -834,25 +957,27 @@ function S6(t) {
   ctx.save();
   ctx.translate(W / 2, H / 2); ctx.scale(push, push); ctx.translate(-W / 2, -H / 2);
   if (t > 79.9) {
-    kText('직원 교육 컨설팅은', W / 2, 440, { size: 76, weight: 430, align: 'center' }, anim(t, 80.0, null, { type: 'rise', size: 76, weight: 430, gap: 0.045, dur: 0.6 }));
-    const L2 = lay('엑스퍼트컨설팅', 190, 900, 0), mid = B.x0 + L2.width / 2;
-    kText('엑스퍼트컨설팅', B.x0, 640, { size: 190, weight: 900 }, (i, n, ch) => {
+    const ks = VERT ? 64 : 76;
+    kText('직원 교육 컨설팅은', W / 2, B.base - 200 + (VERT ? 20 : 0), { size: ks, weight: 430, align: 'center' }, anim(t, 80.0, null, { type: 'rise', size: ks, weight: 430, gap: 0.045, dur: 0.6 }));
+    const L2 = lay('엑스퍼트컨설팅', B.size, 900, 0), mid = B.x0 + L2.width / 2;
+    kText('엑스퍼트컨설팅', B.x0, B.base, { size: B.size, weight: 900 }, (i, n, ch) => {
       const p = cin(t, 81.5, i, n, 0.045, 0.7, 'center');
       const e = E.outExpo(p);
       return { a: clamp(p * 3), s: lerp(1.25, 1, e), w: lerp(90, 900, e), dx: -(ch.ax - mid) * 0.28 * (1 - e) };
     });
     const rl = E.outExpo(prog(t, 83.0, 83.8));
-    if (rl > 0) line(W / 2 - 290 * rl, 712, W / 2 + 290 * rl, 712, C.graphite, 1.5);
+    const ry = B.base + 72, rw = VERT ? 240 : 290;
+    if (rl > 0) line(W / 2 - rw * rl, ry, W / 2 + rw * rl, ry, C.graphite, 1.5);
     if (LOGO) {
       // 로고는 색과 비율을 바꾸지 않고 구분선 아래에 둔다. 태그라인 자리에서 83.3s에 떠오른다.
       const lp = E.outExpo(prog(t, 83.3, 84.1));
       if (lp > 0) {
         const lh = LOGO_W * LOGO.img.naturalHeight / LOGO.img.naturalWidth;
         ctx.save(); ctx.globalAlpha = clamp(lp * 1.5); ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(LOGO.img, W / 2 - LOGO_W / 2, 752 + 18 * (1 - lp), LOGO_W, lh);
+        ctx.drawImage(LOGO.img, W / 2 - LOGO_W / 2, ry + 40 + 18 * (1 - lp), LOGO_W, lh);
         ctx.restore();
       }
-    } else kText('TOTAL HR PROFESSIONAL  ·  SINCE 1994', W / 2, 776, { size: 24, weight: 650, align: 'center', track: 0.34, color: C.graphite },
+    } else kText('TOTAL HR PROFESSIONAL  ·  SINCE 1994', W / 2, ry + 64, { size: 24, weight: 650, align: 'center', track: 0.34, color: C.graphite },
       anim(t, 83.3, null, { type: 'rise', size: 24, weight: 650, gap: 0.012, dur: 0.5 }));
   }
   ctx.restore();
@@ -909,7 +1034,7 @@ function render(t) {
   await Promise.all([document.fonts.load('900 100px Pretendard', '엑스퍼트'), document.fonts.load('400 100px Pretendard', '교육')]);
   makeGrain();
   window.renderFrame = render;
-  window.__meta = { W, H, FPS, DUR, font: document.fonts.check('900 100px Pretendard', '엑'), logo: LOGO ? LOGO.file : null, accent: SPLIT ? 'split' : 'signal' };
+  window.__meta = { W, H, FPS, DUR, font: document.fonts.check('900 100px Pretendard', '엑'), logo: LOGO ? LOGO.file : null, accent: SPLIT ? 'split' : 'signal', format: VERT ? 'vertical' : 'landscape' };
   window.__ready = true;
   if (RENDER) { render(Number(new URLSearchParams(location.search).get('t') || 0)); return; }
 

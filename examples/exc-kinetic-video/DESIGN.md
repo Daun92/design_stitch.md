@@ -56,6 +56,11 @@ spacing:
   frame-height: 1080px
   margin: 140px
   gutter: 48px
+  vertical-frame-width: 1080px
+  vertical-frame-height: 1920px
+  vertical-safe-top: 270px
+  vertical-safe-bottom: 670px
+  vertical-safe-side: 90px
 components:
   keyword-pill:
     backgroundColor: "{colors.paper}"
@@ -114,6 +119,8 @@ components:
 ## Layout
 
 1920×1080, 30fps, 120BPM(한 박 0.5초). 모든 장면 전환과 텍스트 등장은 0.5초 격자에 맞춘다. 좌우 여백 140px. 텍스트와 조형은 좌우로 나눠 배치하고(왼쪽 문장, 오른쪽 진자·모빌 / 왼쪽 고리, 오른쪽 설명), 마지막 카드만 중앙 정렬한다.
+
+**9:16 숏폼판(1080×1920):** 같은 장면을 위아래로 쌓는다(위 진자·고리 / 아래 문장, 위 문장 / 아래 모빌). 글자와 로고는 쇼츠·릴스·틱톡 UI가 덮지 않는 영역(가로 90–990px, 세로 270–1250px) 안에 둔다. 아래쪽 670px와 오른쪽 버튼 줄에는 조형만 둔다. 긴 문장은 두 줄로 나누고, 정렬 장면의 키워드는 6개만 선에 꿴다. 워드마크는 130px 한 줄로 줄인다.
 
 ## Shapes
 

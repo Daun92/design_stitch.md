@@ -7,9 +7,11 @@
     "bgm": "node bgm.mjs",
     "render": "node bgm.mjs && node render.mjs",
     "render:split": "node bgm.mjs && node render.mjs --accent split",
+    "render:split-vertical": "node bgm.mjs && node render.mjs --accent split --format vertical",
     "preview": "npx http-server . -p 8080 -c-1",
     "mix": "node mix-vo.mjs",
-    "mix:split": "node mix-vo.mjs --accent split"
+    "mix:split": "node mix-vo.mjs --accent split",
+    "mix:split-vertical": "node mix-vo.mjs --accent split --format vertical"
   },
   "devDependencies": {
     "playwright-core": "1.56.1",

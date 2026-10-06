@@ -1,6 +1,7 @@
 // vo_sync.json의 배치표대로 내레이션 클립을 영상 타임라인에 놓고, 배경음을 덕킹해 섞는다.
 //   node mix-vo.mjs   →  out/vo-track.wav, out/bgm-ducked.wav, out/vo-clips/*.wav, out/mix.wav, out/exc-kinetic-vo.mp4
 //   node mix-vo.mjs --accent split  →  같은 믹스를 out/exc-kinetic-split.mp4(C안)에 합쳐 out/exc-kinetic-split-vo.mp4
+//   --format vertical을 더하면 9:16 영상(out/exc-kinetic-split-vertical.mp4)에 합친다(render.mjs와 같은 접미사 규칙)
 // 필요: out/exc-kinetic.mp4와 bgm.wav(npm run render), vo/ 안의 블록 테이크(vo_sync.json의 sources)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(ROOT, 'out');
-const ai = process.argv.indexOf('--accent'), SUF = ai < 0 ? '' : `-${process.argv[ai + 1]}`;
+const argOf = k => { const i = process.argv.indexOf(`--${k}`); return i < 0 ? null : process.argv[i + 1]; };
+const SUF = ['accent', 'format'].map(argOf).filter(Boolean).map(v => `-${v}`).join('');
 const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'vo_sync.json'), 'utf8'));
 const M = cfg.mix, SR = M.sample_rate, DUR = 88, N = Math.round(SR * DUR);
 const db2g = db => Math.pow(10, db / 20);

@@ -66,6 +66,7 @@ npm install                 # playwright-core, pretendard(폰트)
 npm run preview             # http://localhost:8080 에서 재생·스크럽
 npm run render              # bgm.wav 합성 → out/exc-kinetic.mp4
 npm run render:split        # C안(0–21초 빨강 → 21초 선부터 초록) → out/exc-kinetic-split.mp4
+npm run render:split-vertical   # C안 9:16 숏폼(1080×1920) → out/exc-kinetic-split-vertical.mp4
 node render.mjs --stills 12,50,82   # 특정 시각 PNG
 node render.mjs --from 29 --to 52   # 구간 미리보기(무음)
 ```
@@ -83,8 +84,16 @@ node render.mjs --from 29 --to 52   # 구간 미리보기(무음)
 | `NARRATION.md` | Eleven v4용 한국어 내레이션 대본(입력문, 큐 시트, 생성·배치·믹스 방법) |
 | `narration.json` | 같은 대본의 기계용 데이터(블록, 큐별 발화 시작·허용 창·대체 문구) |
 | `vo_sync.json` | 실제 Eleven v4 테이크를 큐별로 잘라 놓는 배치표(원본 구간 → 영상 시각, 믹스 설정) |
-| `mix-vo.mjs` | 배치표를 적용해 내레이션·덕킹 배경음을 섞고 `out/exc-kinetic-vo.mp4`를 만든다(`npm run mix`, 테이크는 `vo/`에 둔다). C안은 `npm run mix:split` → `out/exc-kinetic-split-vo.mp4` |
+| `mix-vo.mjs` | 배치표를 적용해 내레이션·덕킹 배경음을 섞고 `out/exc-kinetic-vo.mp4`를 만든다(`npm run mix`, 테이크는 `vo/`에 둔다). C안은 `npm run mix:split`, C안 9:16은 `npm run mix:split-vertical` |
 | `brand/` | 사용자가 준 로고 파일 자리(`logo.svg` 또는 `logo.png`). git에서 제외한다 |
+
+### 9:16 숏폼판
+
+- 규격: 1080×1920, 30fps, H.264 + AAC, 88초. 같은 내레이션 믹스를 쓴다. 미리보기는 `?format=vertical&accent=split`.
+- 길이: YouTube Shorts와 Instagram Reels는 최대 3분, TikTok은 업로드 기준 최대 60분이라 88초를 그대로 올릴 수 있다(2026년 10월 검색 요약 기준). Reels는 90초를 넘으면 추천 노출이 줄어든다는 보도가 있다.
+- 안전 영역: 글자와 로고는 가로 90–990px, 세로 270–1250px 안에 둔다. 플랫폼마다 UI 여백이 달라(위 110–269px, 아래 420–672px, 옆 65–140px) 가장 넓은 값을 기준으로 잡았다.
+- 배치: 가로판의 좌우 분할을 위아래로 쌓는다. 긴 문장은 두 줄로 나누고, 정렬 장면의 키워드는 6개만 선에 꿴다. 엔딩 워드마크는 130px 한 줄이고, 진자 진폭을 줄여 화면 안에서 흔들리게 했다.
+- 강조어 타이밍: 세로판은 '설계'(25.4s)와 '균형'(58.8s) 쾅을 내레이션 시점에 맞췄다. 16:9판은 강조 글자의 등장 순번을 문장 처음부터 세어, '설계'가 약 26.0s, '균형'이 약 59.1s에 찍힌다(확인 필요: 수정 여부 결정 전).
 
 ## 5. 바꾸기 쉬운 곳
 
